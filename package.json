@@ -1,0 +1,44 @@
+{
+  "name": "agentar",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Agentar (agent + avatar): give your AI agent a body with a customizable 3D talking avatar for Claude Code, Codex, and other agent harnesses.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/on-par/agentar.git"
+  },
+  "homepage": "https://github.com/on-par/agentar#readme",
+  "bugs": {
+    "url": "https://github.com/on-par/agentar/issues"
+  },
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/avatar",
+    "apps/bridge",
+    "apps/web",
+    "packages/mcp",
+    "packages/cli"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "dev": "concurrently -n bridge,web -c blue,magenta \"npm run dev -w @agentar/bridge\" \"npm run dev -w @agentar/web\"",
+    "start": "node packages/cli/dist/index.js start",
+    "fetch:models": "node --conditions=development --import tsx scripts/fetch-models.ts",
+    "release:build": "node scripts/build-release.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "concurrently": "^10.0.5",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}

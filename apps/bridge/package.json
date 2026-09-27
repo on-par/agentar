@@ -1,0 +1,28 @@
+{
+  "name": "@agentar/bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local server that connects agents to agentar avatars: HTTP API, WebSocket fan-out, TTS rendering, config storage.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "node --conditions=development --import tsx --watch src/main.ts",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@agentar/core": "0.1.0",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@agentar/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The `agentar` command: start the avatar, speak from scripts, run the MCP server, and install agent hooks.",
+  "type": "module",
+  "bin": {
+    "agentar": "./dist/index.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agentar/bridge": "0.1.0",
+    "@agentar/core": "0.1.0",
+    "@agentar/mcp": "0.1.0"
+  }
+}

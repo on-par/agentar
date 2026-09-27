@@ -1,0 +1,27 @@
+{
+  "name": "@agentar/avatar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "three.js renderer for agentar: loads a humanoid GLB/VRM, customises it, and lip-syncs it to speech.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agentar/core": "0.1.0",
+    "@pixiv/three-vrm": "^3.5.5",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0"
+  }
+}

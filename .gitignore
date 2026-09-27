@@ -1,0 +1,14 @@
+node_modules/
+dist/
+release/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.local
+coverage/
+.playwright-mcp/
+.vite/
+
+# Avatar models are downloaded with `npm run fetch:models` (see assets/models/README.md)
+assets/models/*.glb
+assets/models/*.vrm
