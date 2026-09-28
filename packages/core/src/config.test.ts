@@ -26,6 +26,14 @@ describe("resolveConfig", () => {
     expect(c.behavior.mood).toBe("neutral");
   });
 
+  it("accepts the kokoro voice engine and keeps system as the default", () => {
+    expect(DEFAULT_CONFIG.voice.provider).toBe("system");
+    const c = resolveConfig({ voice: { provider: "kokoro", voice: "af_bella(2)+af_sky(1)" } });
+    expect(c.voice.provider).toBe("kokoro");
+    expect(c.voice.voice).toBe("af_bella(2)+af_sky(1)");
+    expect(resolveConfig({ voice: { provider: "kokoro-js" } }).voice.provider).toBe("system");
+  });
+
   it("allows clearing a color override with null", () => {
     const base = mergeConfig(DEFAULT_CONFIG, { appearance: { hair: "#123456" } });
     expect(mergeConfig(base, { appearance: { hair: null } }).appearance.hair).toBeNull();
