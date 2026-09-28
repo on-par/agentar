@@ -13,6 +13,7 @@
   "dependencies": {
     "@agentar/avatar": "0.1.0",
     "@agentar/core": "0.1.0",
+    "livekit-client": "^2.22.3",
     "three": "^0.186.1"
   },
   "devDependencies": {
