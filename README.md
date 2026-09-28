@@ -109,6 +109,35 @@ curl -X POST localhost:7777/api/record/stop
 
 `stop` returns `{"path": "...", "mime": "...", "bytes": ...}` once the browser tab has finished uploading the clip. The file is WebM (or MP4, depending on the browser) under `~/.agentar/recordings/`. A second `stop` with nothing recording returns 409 and never touches the finished file. The `browser` voice provider cannot be captured, so a clip recorded with it has silent audio (the start response includes a `warning`).
 
+### Headless (CI, servers)
+
+`agentar record` does the same thing in one command, with no display and no open tab. It needs Chrome or Chromium installed.
+
+```bash
+printf 'Hello, I am Nova\n' > intro.txt
+agentar record --text-file intro.txt --out intro.webm [--mood happy]
+ffprobe -v error -show_entries stream=codec_type -of csv=p=0 intro.webm   # optional: prints video and audio
+```
+
+`record` starts its own private bridge on a random port, opens `?stage=1` in headless Chrome, speaks the file's text (max 5000 characters), and writes one WebM with a video track and an audio track to `--out`. It exits 0 on success. It never uses or disturbs a running `agentar start` or `--daemon` bridge. Chrome, its temporary profile, and the private bridge are cleaned up on success, failure, and Ctrl-C. Chrome's own log output is hidden unless the run fails.
+
+Chrome is started with:
+
+- `--headless=new --use-angle=swiftshader --enable-unsafe-swiftshader`: software WebGL through SwiftShader, so the three.js stage renders without a GPU.
+- `--autoplay-policy=no-user-gesture-required`: lets the voice audio start without a click.
+- `--no-first-run --no-default-browser-check --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --window-size=1280,720` and a throwaway `--user-data-dir`.
+- On Linux, `--disable-dev-shm-usage`. When running as root (common in Docker CI), `--no-sandbox`.
+
+Environment:
+
+- `AGENTAR_CHROME`: path to the Chrome/Chromium binary. Otherwise the usual install locations are checked (`/Applications/Google Chrome.app`, `/usr/bin/google-chrome`, `/usr/bin/chromium`, and so on).
+- `AGENTAR_RECORD_SETTLE_MS`: how long to wait after the page connects so the avatar can load before recording starts (default 2000).
+- `AGENTAR_HOME`: the voice and avatar settings are read from here, as with `agentar start`.
+
+On Linux, install `chromium` or `google-chrome-stable`, plus `espeak-ng` for the default `system` voice (or configure an `edge` or cloud voice). Without a capturable voice the clip falls back to silent audio and `record` prints a warning.
+
+Supported: Node 24 on macOS 15+ (Apple Silicon) and Ubuntu 24.04, with current stable Chrome/Chromium. Windows is untested.
+
 ## Customize
 
 - **Look**: body model (built-in or your own `.glb`/`.vrm` upload), and the colors of skin, hair, eyes, top, bottom, and shoes. Colors are re-tinted in the shader, so the texture detail stays. Also glasses, hats, and height.
