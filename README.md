@@ -97,6 +97,18 @@ To get a global `agentar` command, run `npm link -w @agentar/cli`.
 
 Before speaking, agentar rewrites markdown for the ear. It removes code blocks, links, and paths, and it trims long replies.
 
+## Record a clip
+
+Save the avatar speaking to one video file, no OBS or ffmpeg required. Open the agentar page (or `?stage=1`) in a browser tab, then:
+
+```bash
+curl -X POST localhost:7777/api/record/start
+curl -X POST localhost:7777/api/say -d '{"text":"Hello, I am Nova","wait":true}' -H 'Content-Type: application/json'
+curl -X POST localhost:7777/api/record/stop
+```
+
+`stop` returns `{"path": "...", "mime": "...", "bytes": ...}` once the browser tab has finished uploading the clip. The file is WebM (or MP4, depending on the browser) under `~/.agentar/recordings/`. A second `stop` with nothing recording returns 409 and never touches the finished file. The `browser` voice provider cannot be captured, so a clip recorded with it has silent audio (the start response includes a `warning`).
+
 ## Customize
 
 - **Look**: body model (built-in or your own `.glb`/`.vrm` upload), and the colors of skin, hair, eyes, top, bottom, and shoes. Colors are re-tinted in the shader, so the texture detail stays. Also glasses, hats, and height.
