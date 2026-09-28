@@ -415,6 +415,48 @@ input[type="color"].unset {
   padding: 3px 8px;
 }
 
+.snippet-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.link-button {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.link-button:hover {
+  background: var(--surface-hover);
+}
+
+.join-call {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.join-call .snippets-title {
+  color: var(--accent);
+}
+
+.steps {
+  margin: -4px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.steps li + li {
+  margin-top: 4px;
+}
+
 /* ---------- chat ---------- */
 
 .chat-settings summary {
@@ -482,6 +524,7 @@ input[type="color"].unset {
   border: 1px solid rgba(255, 138, 128, 0.3);
   font-size: 12px;
 }
+
 
 /* ---------- overlays ---------- */
 
