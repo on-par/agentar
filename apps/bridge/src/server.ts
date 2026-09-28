@@ -15,6 +15,7 @@ import {
   type ClientMessage,
   type Gesture,
   type HealthResponse,
+  type JoinResponse,
   type SayRequest,
   type ServerMessage,
   type VoiceProvider,
@@ -55,6 +56,8 @@ export interface BridgeOptions {
    * (comma-separated), else none.
    */
   allowedOrigins?: string[];
+  /** How long POST /api/join waits for the avatar page to connect (tests). Default 20s. */
+  joinTimeoutMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -89,6 +92,14 @@ const MAX_MODEL = 150 * 1024 * 1024;
 const MAX_CHUNK = 64 * 1024 * 1024;
 const MAX_TEXT = 5000;
 const AUDIO_TTL_MS = 10 * 60 * 1000;
+const JOIN_TIMEOUT_MS = 20_000;
+const JOIN_PROTOCOLS = new Set(["ws:", "wss:", "http:", "https:"]);
+
+interface JoinResult {
+  ok: boolean;
+  room?: string;
+  error?: string;
+}
 
 /** Start the bridge server. */
 export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
@@ -118,6 +129,11 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
   const audio = new Map<string, { data: Buffer; mime: string; expires: number }>();
   const clients = new Map<WebSocket, { id: string }>();
   const recorder = new RecordingManager(join(home, "recordings"));
+  const joinTimeoutMs = opts.joinTimeoutMs ?? JOIN_TIMEOUT_MS;
+  /** Joins waiting for the avatar page's join-result, by join id. */
+  const pendingJoins = new Map<string, { clientId: string; resolve: (r: JoinResult) => void }>();
+  /** The room the avatar page is currently publishing into (one per bridge). */
+  let activeJoin: { id: string; clientId: string } | null = null;
 
   const broadcast = (msg: ServerMessage) => {
     const data = JSON.stringify(msg);
@@ -348,6 +364,51 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
       }
     }
 
+    if (path === "/api/join" && method === "POST") {
+      const body = (await readJson(req)) as { url?: unknown; token?: unknown };
+      if (!validJoinUrl(body.url) || typeof body.token !== "string" || !body.token.trim()) {
+        return sendJson(res, 400, { error: "Provide `url` (ws:// or wss:// LiveKit URL) and a non-empty `token`." });
+      }
+      const last = lastClient();
+      if (!last) return sendJson(res, 409, { error: "No avatar page is open. Open the agentar page (or ?stage=1) first." });
+      if (pendingJoins.size || activeJoin) return sendJson(res, 409, { error: "Already in a room. POST /api/leave first." });
+
+      const id = randomUUID();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const result = new Promise<JoinResult | null>((resolve) => {
+        pendingJoins.set(id, { clientId: last.id, resolve });
+        timer = setTimeout(() => resolve(null), joinTimeoutMs);
+      });
+      sendTo(last.ws, { type: "join", id, url: body.url, token: body.token });
+      let outcome: JoinResult | null;
+      try {
+        outcome = await result;
+      } finally {
+        clearTimeout(timer);
+        pendingJoins.delete(id);
+      }
+      if (!outcome) {
+        // Leave anyway so a late success does not leave a ghost participant behind.
+        sendTo(last.ws, { type: "leave" });
+        return sendJson(res, 504, { error: "The avatar page did not answer the join in time" });
+      }
+      if (!outcome.ok) return sendJson(res, 502, { error: outcome.error || "Could not join the room" });
+      activeJoin = { id, clientId: last.id };
+      log(`joined room ${outcome.room ?? "(unnamed)"}`);
+      const warning = store.get().voice.provider === "browser" ? "The browser voice cannot be captured; the room will hear silence." : undefined;
+      const response: JoinResponse = { id, status: "joined", ...(outcome.room ? { room: outcome.room } : {}), ...(warning ? { warning } : {}) };
+      return sendJson(res, 200, response);
+    }
+
+    if (path === "/api/leave" && method === "POST") {
+      if (!activeJoin) return sendJson(res, 200, { ok: true, status: "not-joined" });
+      const ws = findClient(activeJoin.clientId);
+      if (ws) sendTo(ws, { type: "leave" });
+      activeJoin = null;
+      log("left the room");
+      return sendJson(res, 200, { ok: true });
+    }
+
     const chunkMatch = /^\/api\/record\/([\w-]+)\/chunk$/.exec(path);
     if (chunkMatch && method === "POST") {
       const data = await readBody(req, MAX_CHUNK);
@@ -491,12 +552,27 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
       if (msg.type === "record-error" && typeof msg.id === "string") {
         recorder.fail(msg.id, String(msg.error));
       }
+      if (msg.type === "join-result" && typeof msg.id === "string") {
+        const pending = pendingJoins.get(msg.id);
+        // Only the page the join was sent to may settle it.
+        if (pending?.clientId === clientId) {
+          pending.resolve({
+            ok: msg.ok === true,
+            room: typeof msg.room === "string" ? msg.room : undefined,
+            error: typeof msg.error === "string" ? msg.error : undefined,
+          });
+        }
+      }
     });
     ws.on("close", () => {
       clients.delete(ws);
       log(`avatar disconnected (${clients.size} left)`);
       const active = recorder.active;
       if (active?.clientId === clientId) recorder.fail(active.id, "The recording page disconnected");
+      for (const pending of pendingJoins.values()) {
+        if (pending.clientId === clientId) pending.resolve({ ok: false, error: "The avatar page disconnected" });
+      }
+      if (activeJoin?.clientId === clientId) activeJoin = null;
     });
   });
 
@@ -522,6 +598,7 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
       new Promise<void>((r) => {
         queue.stop();
         recorder.abort();
+        for (const pending of pendingJoins.values()) pending.resolve({ ok: false, error: "Bridge shutting down" });
         for (const ws of clients.keys()) ws.terminate();
         wss.close();
         server.close(() => r());
@@ -558,6 +635,16 @@ function parseOrigins(list: string[]): Set<string> {
     }
   }
   return out;
+}
+
+/** A LiveKit server URL: ws://, wss://, http:// or https://. */
+function validJoinUrl(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    return JOIN_PROTOCOLS.has(new URL(value).protocol);
+  } catch {
+    return false;
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {

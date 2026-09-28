@@ -4,6 +4,7 @@ import { BUILTIN_MODELS, DEFAULT_CONFIG, mergeConfig, type AvatarConfig, type Mo
 import { BridgeClient } from "./bridge-client.js";
 import { Panel, safeStorage } from "./panel.js";
 import { StageRecorder } from "./recorder.js";
+import { RoomPublisher, type RoomLike } from "./room-publisher.js";
 
 const params = new URLSearchParams(location.search);
 /** Clean view for OBS / virtual cameras: no panel, no orbit controls. */
@@ -25,9 +26,21 @@ const unlockEl = $("#unlock");
 
 const stage = new Stage(stageEl, { interactive: !stageMode });
 const client = new BridgeClient();
-const recorder = new StageRecorder({
+const publisher = new RoomPublisher({
   canvas: stage.renderer.domElement,
   speech: stage.speech,
+  connect: connectLiveKit,
+  report: (r) => client.send({ type: "join-result", ...r }),
+});
+const recorder = new StageRecorder({
+  canvas: stage.renderer.domElement,
+  speech: {
+    captureAudio: () => stage.speech.captureAudio(),
+    // The room is still publishing the same capture track; keep it alive.
+    releaseCapture: () => {
+      if (!publisher.joined) stage.speech.releaseCapture();
+    },
+  },
   MediaRecorder,
   upload: (id, chunk, final) =>
     fetch(`/api/record/${id}/chunk${final ? "?final=1" : ""}`, {
@@ -66,6 +79,27 @@ const panel = new Panel({
 if (!stageMode) document.body.append(panel.el);
 // Dev builds expose the stage for debugging from the console and browser automation.
 if (import.meta.env.DEV) Object.assign(window, { agentar: { stage } });
+
+/** Join a LiveKit room. The SDK loads lazily, so the stage and OBS path never pay for it. */
+async function connectLiveKit(url: string, token: string): Promise<RoomLike> {
+  const { Room, Track } = await import("livekit-client");
+  const room = new Room();
+  await room.connect(url, token);
+  return {
+    get name() {
+      return room.name;
+    },
+    localParticipant: {
+      publishTrack: (track, opts) =>
+        room.localParticipant.publishTrack(track, {
+          name: opts?.name,
+          source: opts?.source === "microphone" ? Track.Source.Microphone : Track.Source.Camera,
+        }),
+    },
+    // Keep local tracks running: the speech capture track is shared with the recorder.
+    disconnect: () => room.disconnect(false),
+  };
+}
 
 function applyConfig(next: AvatarConfig): void {
   config = next;
@@ -212,6 +246,13 @@ client.onMessage = (msg) => {
     case "record-stop":
       void recorder.stop(msg.id);
       break;
+    case "join":
+      void stage.speech.unlock();
+      void publisher.join(msg.id, msg.url, msg.token);
+      break;
+    case "leave":
+      void publisher.leave().catch((err: Error) => console.error("[agentar] leaving the room failed", err));
+      break;
   }
 };
 
@@ -224,4 +265,4 @@ applyConfig(config);
 client.connect();
 
 // Handy for debugging and automated checks.
-Object.assign(window, { agentar: { stage, client, config: () => config } });
+Object.assign(window, { agentar: { stage, client, publisher, config: () => config } });
