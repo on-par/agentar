@@ -23,8 +23,9 @@ import { SpeechQueue, type RenderedAudio } from "./speech-queue.js";
 import { ConfigStore, agentarHome } from "./store.js";
 import { ElevenLabsTts, OpenAiTts, XaiTts } from "./tts/cloud.js";
 import { EdgeTts } from "./tts/edge.js";
+import { chooseFallback } from "./tts/fallback.js";
 import { SystemTts } from "./tts/system.js";
-import type { TtsProvider } from "./tts/types.js";
+import type { SynthesisResult, TtsProvider } from "./tts/types.js";
 
 export const VERSION = "0.1.0";
 
@@ -104,14 +105,53 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
     for (const ws of clients.keys()) if (ws.readyState === ws.OPEN) ws.send(data);
   };
 
+  /**
+   * Switch away from a voice engine that cannot work on this machine (see
+   * chooseFallback), save the choice, and tell every open view.
+   * Returns false when `failed` should keep its error instead.
+   */
+  const fallBack = async (failed: VoiceProvider, viaFallback: boolean): Promise<boolean> => {
+    const next = chooseFallback(failed, {
+      systemMissing: failed === "system" && (await providers.system.unavailableReason()) !== null,
+      edgeReady: failed !== "edge" && (await providers.edge.unavailableReason()) === null,
+      viaFallback,
+    });
+    if (!next) return false;
+    // Another request may have switched already.
+    if (store.get().voice.provider === failed) {
+      const config = await store.update({ voice: { provider: next, voice: "" } });
+      broadcast({ type: "config", config });
+      log(`the ${failed} voice cannot speak on this machine; switched to ${next}`);
+    }
+    return true;
+  };
+
+  /** Render speech with the configured engine, or null when the browser speaks it. */
+  const synthesize = async (text: string, signal: AbortSignal, viaFallback = false): Promise<SynthesisResult | null> => {
+    const voice = store.get().voice;
+    if (voice.provider === "browser") return null;
+    try {
+      return await providers[voice.provider].synthesize(text, voice, signal);
+    } catch (err) {
+      if (signal.aborted || !(await fallBack(voice.provider, viaFallback))) throw err;
+      return synthesize(text, signal, true);
+    }
+  };
+
+  // The default engine needs an OS binary that Linux often lacks. Pick one
+  // that works before the first `say` instead of failing it.
+  if (store.get().voice.provider === "system") {
+    await fallBack("system", false).catch((err: unknown) => log(`voice check failed: ${(err as Error).message}`));
+  }
+
   const queue = new SpeechQueue({
     clientCount: () => clients.size,
     speechRate: () => store.get().voice.rate,
     broadcast,
     render: async (id, text, signal): Promise<RenderedAudio | null> => {
-      const voice = store.get().voice;
-      if (voice.provider === "browser") return null;
-      const { data, mime } = await providers[voice.provider].synthesize(text, voice, signal);
+      const result = await synthesize(text, signal);
+      if (!result) return null;
+      const { data, mime } = result;
       const now = Date.now();
       for (const [k, v] of audio) if (v.expires < now) audio.delete(k);
       audio.set(id, { data, mime, expires: now + AUDIO_TTL_MS });

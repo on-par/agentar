@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG, type VoiceSettings } from "@agentar/core";
 import { XaiTts } from "./cloud.js";
 import { EdgeTts, edgeRate, parseEdgeVoices } from "./edge.js";
+import { chooseFallback } from "./fallback.js";
 
 const voice = (patch: Partial<VoiceSettings> = {}): VoiceSettings => ({ ...DEFAULT_CONFIG.voice, ...patch });
 
@@ -23,6 +24,30 @@ describe("parseEdgeVoices", () => {
       { id: "en-US-AndrewMultilingualNeural", name: "Andrew Multilingual, male", language: "en-US" },
       { id: "zh-CN-liaoning-XiaobeiNeural", name: "Xiaobei, female", language: "zh-CN-liaoning" },
     ]);
+  });
+});
+
+describe("chooseFallback", () => {
+  const status = (patch: Partial<Parameters<typeof chooseFallback>[1]> = {}) => ({ systemMissing: true, edgeReady: false, viaFallback: false, ...patch });
+
+  it("moves a missing system engine to edge-tts when it is installed", () => {
+    expect(chooseFallback("system", status({ edgeReady: true }))).toBe("edge");
+  });
+
+  it("moves a missing system engine to the browser when edge-tts is not installed", () => {
+    expect(chooseFallback("system", status())).toBe("browser");
+  });
+
+  it("keeps the error when the system engine is installed but failed", () => {
+    expect(chooseFallback("system", status({ systemMissing: false, edgeReady: true }))).toBeNull();
+  });
+
+  it("moves a fallback edge-tts that fails on to the browser", () => {
+    expect(chooseFallback("edge", status({ viaFallback: true }))).toBe("browser");
+  });
+
+  it("keeps the error for engines the user chose", () => {
+    for (const p of ["edge", "openai", "elevenlabs", "xai"] as const) expect(chooseFallback(p, status())).toBeNull();
   });
 });
 

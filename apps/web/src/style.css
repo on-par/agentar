@@ -377,6 +377,15 @@ input[type="color"].unset {
   gap: 14px;
 }
 
+.snippets-title {
+  margin: 4px 0 -6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .snippet-head {
   display: flex;
   justify-content: space-between;

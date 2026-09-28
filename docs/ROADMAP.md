@@ -12,7 +12,18 @@
 - Agent integration: MCP server, Claude Code Stop hook, Codex notify hook, and an HTTP API
 - OBS stage view for virtual cameras
 
+## Shipped since v0.1
+
+- **Consumer simple start**: double-click launchers in `scripts/` (`Agentar.command`, `agentar-start.sh`, `agentar-start.cmd`) that install, build, and open the avatar.
+- **TTS fallback**: when the OS speech engine is missing, the bridge switches to Edge voices or the browser's own voice instead of failing.
+- **Talking agents (people path)** in the Connect tab and README: OpenClaw, Hermes, Grok Bot, and Muse speak through `POST /api/say`.
+
 ## Next
+
+Ship sequence (locked): **Cut A** (this PR) → **Chat B** → **Cut C** (OBS-assisted Join-a-call) → native Electron virtual cam → meeting bot.
+
+- **Chat over HTTP with named connectors** (Cut B / next PR): a Chat tab and a chat endpoint, with first-class connectors for OpenClaw, Hermes, Grok Bot, and Muse, so people can talk to their agent from the avatar page. A generic webhook remains the shared adapter / escape hatch underneath.
+- **Cut C — OBS-assisted OpenClaw Join-a-call**: OpenClaw skill + Connect “Join a call” so Agentar is the Zoom/Discord webcam via OBS Virtual Camera (near-term first-class path). Do not confuse with the manual OBS Browser Source already documented under Meetings. Electron/Tauri virtual cam and meeting-bot APIs stay later.
 
 - **Better lip-sync accuracy**
   - Use provider timestamps (ElevenLabs `with-timestamps`, Azure viseme events) when they are available.

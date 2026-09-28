@@ -340,12 +340,28 @@ export class Panel {
       });
       return h("div", { class: "snippet" }, h("div", { class: "snippet-head" }, h("strong", { textContent: title }), copy), pre, note ? h("p", { class: "note", textContent: note }) : null);
     };
+    const heading = (text: string) => h("h3", { class: "snippets-title", textContent: text });
     this.snippets.replaceChildren(
+      heading("Talking agents (people path)"),
+      h("p", {
+        class: "note",
+        textContent:
+          "OpenClaw, Hermes, Grok Bot, Muse, or any agent that can send a web request: have it POST each reply to this address and the avatar speaks it.",
+      }),
+      snippet(
+        "Make the avatar speak",
+        `curl -X POST ${origin}/api/say -H "Content-Type: application/json" -d '{"text":"Hi! I am here.","mood":"happy"}'`,
+        'Optional fields: "mood", "wait": true (answer after the avatar finishes), "interrupt": false (queue instead of cutting in).',
+      ),
+      heading("Builders"),
       snippet("Claude Code: MCP tools", `claude mcp add agentar -- ${cli} mcp`, "Gives Claude speak, set_mood and gesture tools it can call when it wants to talk."),
       snippet("Claude Code: speak every reply", `${cli} install claude-code`, "Adds a Stop hook to ~/.claude/settings.json that reads each final reply aloud."),
       snippet("Codex CLI", `${cli} install codex`, "Adds a notify hook and the MCP server to ~/.codex/config.toml."),
-      snippet("Anything else (curl)", `curl -X POST ${origin}/api/say -H "Content-Type: application/json" -d '{"text":"Build finished!","mood":"happy"}'`),
-      snippet("Video calls (OBS virtual camera)", `${origin}/?stage=1`, "Add as an OBS Browser Source (1280x720), start the Virtual Camera, and pick it in Zoom, Teams or Meet. See docs/meetings.md for audio."),
+      snippet(
+        "Video calls (OBS virtual camera)",
+        `${origin}/?stage=1`,
+        "Add as an OBS Browser Source (1280x720), start the Virtual Camera, and pick it in Zoom, Teams or Meet. See docs/meetings.md for audio. Next (Cut C): OBS-assisted OpenClaw Join-a-call so the agent uses Agentar as the Zoom/Discord webcam.",
+      ),
     );
   }
 
