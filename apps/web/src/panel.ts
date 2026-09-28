@@ -20,7 +20,7 @@ import {
 } from "@agentar/core";
 import { browserVoices } from "@agentar/avatar";
 import type { BridgeClient, BridgeInfo, ConnectionState, ModelList } from "./bridge-client.js";
-import { AUDIO_NOTE, joinACallSteps, SKILL_NAME, skillDirFromCli, SPEECH_NOTE, stageUrl } from "./join-a-call.js";
+import { AUDIO_NOTE, joinACallSteps, RECALL_DOCS_URL, SKILL_NAME, skillDirFromCli, SPEECH_NOTE, stageUrl } from "./join-a-call.js";
 
 type Patch = Record<string, unknown>;
 type Syncer = (c: AvatarConfig) => void;
@@ -601,6 +601,7 @@ export class Panel {
         h("ol", { class: "steps" }, ...joinACallSteps(stage).map((s) => h("li", { textContent: s }))),
         h("p", { class: "note", textContent: AUDIO_NOTE }),
         h("p", { class: "note", textContent: SPEECH_NOTE }),
+        h("p", { class: "note" }, "Zoom bot instead of OBS? ", h("a", { href: RECALL_DOCS_URL, target: "_blank", rel: "noopener", textContent: "Meeting bot (Recall spike)" })),
         snippet(
           "OpenClaw: install the Join-a-call skill",
           `openclaw skills install ${skillDir ? shellQuote(skillDir) : `<agentar>/skills/${SKILL_NAME}`}`,

@@ -38,3 +38,6 @@ export function skillDirFromCli(cliPath: string): string | null {
   const [, root, sep] = m;
   return `${root}${sep}skills${sep}${SKILL_NAME}`;
 }
+
+/** Docs for the Recall.ai meeting-bot spike (Zoom / Meet / Teams participant, not Discord). */
+export const RECALL_DOCS_URL = "https://github.com/on-par/agentar/blob/main/docs/meetings.md#meeting-bot-recall-spike";

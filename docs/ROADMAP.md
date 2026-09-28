@@ -27,7 +27,7 @@
 
 ## Next
 
-Ship sequence (locked): **Cut A** (shipped, [#1](https://github.com/on-par/agentar/pull/1)) → **Chat B** (shipped, [#2](https://github.com/on-par/agentar/pull/2)) → **Cut C** (OBS-assisted Join-a-call, this PR) → native Electron virtual cam → meeting bot.
+Ship sequence (locked): **Cut A** (shipped, [#1](https://github.com/on-par/agentar/pull/1)) → **Chat B** (shipped, [#2](https://github.com/on-par/agentar/pull/2)) → **Cut C** (shipped, [#4](https://github.com/on-par/agentar/pull/4)) → native Electron virtual cam → meeting bot (Recall spike documented).
 
 - **Chat follow-ups**:
   - Test Grok Bot against a live bot and tune its polling.
@@ -49,6 +49,9 @@ Ship sequence (locked): **Cut A** (shipped, [#1](https://github.com/on-par/agent
 
 ## Meetings (Zoom, Teams, Meet)
 
-1. **Now**: OBS Virtual Camera plus a virtual audio device, set up from **Connect → Join a call** or the OpenClaw `agentar-join-a-call` skill. See [meetings.md](meetings.md).
-2. **Bundled virtual camera**: an Electron or Tauri shell that renders offscreen and publishes a virtual camera and microphone directly.
-3. **Meeting bot**: the agent joins as a participant through a meeting-bot API (Recall.ai, or the Zoom Meeting SDK / Teams bot framework). It streams the rendered avatar as video and the TTS audio as its microphone, and it sends transcribed meeting audio back to the agent.
+1. **Now (Cut C, shipped)**: OBS Virtual Camera plus a virtual audio device, set up from **Connect → Join a call** or the OpenClaw `agentar-join-a-call` skill. See [meetings.md](meetings.md). This is the path for **Discord**: Discord bots cannot send video, so agentar's face in Discord stays a human-client camera.
+2. **Bundled virtual camera**: an Electron or Tauri shell that renders offscreen and publishes a virtual camera and microphone directly. Still a human-client camera, so it also covers Discord.
+3. **Meeting bot** (in progress): the agent joins as its own participant.
+   - **Recall.ai spike (documented)**: Recall's Output Media loads the public stage (`/?stage=1` over an HTTPS tunnel) as the bot's camera and microphone in Zoom, Meet, Teams, or Webex. The bridge accepts the tunnel through `AGENTAR_ALLOWED_ORIGINS`. Not yet proven against a live call. See [Meeting bot (Recall spike)](meetings.md#meeting-bot-recall-spike) and the [`agentar-recall-zoom`](../skills/agentar-recall-zoom/SKILL.md) skill.
+   - Next: send transcribed meeting audio back to the agent.
+   - Deferred: the Zoom Meeting SDK / Teams bot framework (native video frames, own infrastructure, app review), unless Recall does not work out.

@@ -1,0 +1,15 @@
+{
+  "meeting_url": "ZOOM_MEETING_URL",
+  "bot_name": "agentar",
+  "output_media": {
+    "camera": {
+      "kind": "webpage",
+      "config": {
+        "url": "STAGE_PUBLIC_URL"
+      }
+    }
+  },
+  "variant": {
+    "zoom": "web_gpu"
+  }
+}
