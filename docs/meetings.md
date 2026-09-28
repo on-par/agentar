@@ -1,8 +1,9 @@
 # Using agentar in video calls
 
-There are two ways to put agentar in a call:
+There are three ways to put agentar in a call:
 
 - **OBS camera** (the main path): OBS turns the avatar into a webcam on your computer. You join the call, and your agent (OpenClaw or any other) shows up as agentar in **Zoom** or **Discord** (or Teams / Meet). This is the only way to show agentar's face in Discord.
+- **WebRTC room (LiveKit)**: the stage joins a LiveKit room as its own participant. See [Join a WebRTC room (LiveKit)](#join-a-webrtc-room-livekit).
 - **Meeting bot (Recall spike)**: a Recall.ai bot joins **Zoom** (or Meet / Teams / Webex) as its own participant, with agentar as its camera and voice. See [Meeting bot (Recall spike)](#meeting-bot-recall-spike).
 
 ## Quick path
@@ -42,6 +43,26 @@ If your main agentar tab is also open, it plays audio too. Open it with `?mute=1
 ## Speaking
 
 The stage is only the camera. The agent still speaks through the bridge: `POST http://localhost:7777/api/say` with `{"text": "…"}`. Every open view, including the OBS browser source, says it with lip-sync.
+
+## Join a WebRTC room (LiveKit)
+
+The stage can also join a [LiveKit](https://livekit.io) room as its own participant, with no OBS Virtual Camera and no virtual audio device. It publishes the avatar canvas as its camera and its speech as its microphone. This is in addition to the OBS path, which works as before. The platform choice is explained in [WebRTC publishing platform selection](decisions/webrtc-platform-selection.md).
+
+1. Open the agentar page, or the stage at `http://localhost:7777/?stage=1`. That tab publishes into the room.
+2. Get a LiveKit server URL and a participant access token (with publish rights) from your LiveKit project. For local testing, run `livekit-server --dev` and use `ws://localhost:7880`.
+3. Join:
+
+   ```bash
+   curl -X POST localhost:7777/api/join -H 'Content-Type: application/json' \
+     -d '{"url":"wss://your-project.livekit.cloud","token":"<access token>"}'
+   ```
+
+   The request returns `{"id": "...", "status": "joined", "room": "..."}` only once the page has connected and published both tracks. A rejected or expired token returns 502 with the error, no open page returns 409, and a page that does not answer within 20 seconds returns 504. One room at a time: a second join returns 409 until you leave.
+
+4. Speak with `POST /api/say` as usual; everyone in the room hears it with lip-sync.
+5. Leave with `curl -X POST localhost:7777/api/leave`.
+
+The bridge never logs the token. The `browser` voice provider cannot be captured, so with it the room hears silence (the join response includes a `warning`).
 
 ## Meeting bot (Recall spike)
 
