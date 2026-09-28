@@ -2,6 +2,7 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_PORT, isMood, toSpeakable } from "@agentar/core";
+import { clearDaemonState, daemonPaths, daemonStatus, spawnDaemon, stopDaemon, waitForDaemon, writeDaemonState } from "./daemon.js";
 import { claudeCodeReply, codexReply } from "./hooks.js";
 import { installClaudeCode, installCodex } from "./install.js";
 
@@ -11,9 +12,13 @@ const BRIDGE = process.env.AGENTAR_URL ?? `http://localhost:${process.env.AGENTA
 const HELP = `agentar (agent + avatar) — give your AI agent a body
 
 Usage:
-  agentar start [--port N] [--no-open]   Start the bridge and open the avatar in your browser
+  agentar start [--port N] [--no-open] [--daemon]
+                                          Start the bridge and open the avatar in your browser
+                                          (--daemon keeps it running after the terminal closes)
+  agentar status                         Show whether the background bridge (--daemon) is running
+  agentar stop                           Stop the background bridge started with --daemon
   agentar say <text> [--mood M] [--wait] Make the avatar speak
-  agentar stop                           Stop speaking
+  agentar hush                           Stop speaking
   agentar fetch-models [--all]           Download the built-in avatars (--all adds non-commercial samples)
   agentar mcp                            Run the MCP server (stdio) for Claude Code / Codex
   agentar hook claude-code               Claude Code Stop hook (reads JSON on stdin)
@@ -24,7 +29,8 @@ Usage:
 Environment:
   AGENTAR_PORT (default ${DEFAULT_PORT}), AGENTAR_URL, AGENTAR_HOME (default ~/.agentar),
   OPENAI_API_KEY, ELEVENLABS_API_KEY, XAI_API_KEY for cloud voices,
-  AGENTAR_EDGE_TTS (path to edge-tts, if it is not on PATH).`;
+  AGENTAR_EDGE_TTS (path to edge-tts, if it is not on PATH).
+  AGENTAR_HOME/agentar.pid and AGENTAR_HOME/agentar.log track the --daemon process.`;
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
@@ -33,7 +39,21 @@ async function main(argv: string[]): Promise<number> {
       return start(rest);
     case "say":
       return say(rest);
-    case "stop":
+    case "status": {
+      const s = await daemonStatus();
+      if (s.running) {
+        console.log(`agentar is running (pid ${s.state.pid}) → ${s.state.url}`);
+        return 0;
+      }
+      console.log("agentar is not running");
+      return 1;
+    }
+    case "stop": {
+      const s = await stopDaemon();
+      console.log(s.running ? `agentar stopped (pid ${s.state.pid})` : "agentar is not running");
+      return 0;
+    }
+    case "hush":
       await fetch(`${BRIDGE}/api/stop`, { method: "POST" });
       return 0;
     case "fetch-models": {
@@ -62,6 +82,7 @@ async function main(argv: string[]): Promise<number> {
 }
 
 async function start(args: string[]): Promise<number> {
+  if (args.includes("--daemon")) return startDaemon(args.filter((a) => a !== "--daemon"));
   const portIdx = args.indexOf("--port");
   const port = portIdx >= 0 ? Number(args[portIdx + 1]) : undefined;
   const { defaultModelsDir, fetchModels, startBridge } = await import("@agentar/bridge");
@@ -71,10 +92,40 @@ async function start(args: string[]): Promise<number> {
   const bridge = await startBridge({ ...(port ? { port } : {}), modelsDir, cliPath: CLI_PATH });
   console.log(`\n  agentar is running → ${bridge.url}\n  OBS / virtual camera view → ${bridge.url}/?stage=1\n`);
   if (!args.includes("--no-open")) openBrowser(bridge.url);
-  const shutdown = () => void bridge.close().then(() => process.exit(0));
+  const daemonMode = process.env.AGENTAR_DAEMON === "1";
+  if (daemonMode) {
+    await writeDaemonState({ pid: process.pid, port: bridge.port, url: bridge.url, startedAt: new Date().toISOString() });
+    process.on("SIGHUP", () => undefined);
+  }
+  const shutdown = () =>
+    void bridge
+      .close()
+      .then(() => (daemonMode ? clearDaemonState(process.pid) : undefined))
+      .then(() => process.exit(0));
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   return -1;
+}
+
+async function startDaemon(args: string[]): Promise<number> {
+  if (process.platform === "win32") {
+    console.error("agentar start --daemon is not supported on Windows yet; run agentar start in its own terminal.");
+    return 1;
+  }
+  const existing = await daemonStatus();
+  if (existing.running) {
+    console.error(`agentar is already running (pid ${existing.state.pid}) → ${existing.state.url}`);
+    return 1;
+  }
+  const pid = await spawnDaemon(CLI_PATH, args);
+  const state = await waitForDaemon(pid);
+  if (!state) {
+    console.error(`agentar daemon failed to start; see ${daemonPaths().logFile}`);
+    return 1;
+  }
+  console.log(`\n  agentar is running in the background (pid ${state.pid}) → ${state.url}\n  OBS / virtual camera view → ${state.url}/?stage=1\n  Stop it with: agentar stop\n`);
+  if (!args.includes("--no-open")) openBrowser(state.url);
+  return 0;
 }
 
 async function say(args: string[]): Promise<number> {
