@@ -48,6 +48,18 @@ For development with hot reload:
 npm run dev            # bridge on :7777 and Vite on http://localhost:5173
 ```
 
+### Run it in the background
+
+`agentar start` runs in the foreground, so closing the terminal stops it. For a long call or OBS session, start it as a daemon instead:
+
+```bash
+agentar start --daemon   # starts the bridge; keeps running after the terminal closes
+agentar status            # agentar is running (pid N) → http://localhost:7777
+agentar stop               # stops it and frees the port
+```
+
+Logs go to `~/.agentar/agentar.log` (override the whole directory with `AGENTAR_HOME`). Daemon mode is not supported on Windows yet; run `agentar start` in its own terminal there instead.
+
 ## Talking agents (people path)
 
 **OpenClaw**, **Hermes**, **Grok Bot**, **Muse**, or any agent that can send a web request can make the avatar speak. Have the agent POST each reply to the bridge:

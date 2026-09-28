@@ -4,6 +4,7 @@ Until agentar has a native meeting bot (see the roadmap), use OBS to turn the av
 
 ## Quick path
 
+- Start agentar with `agentar start --daemon` so the bridge outlives your terminal for the whole call; run `agentar stop` afterwards to free the port. See [Run it in the background](../README.md#run-it-in-the-background).
 - **Connect → Join a call** in the agentar page shows the stage URL with Copy and Open buttons, the four OBS steps below, and the audio setup.
 - **OpenClaw**: install the [`agentar-join-a-call`](../skills/agentar-join-a-call/SKILL.md) skill, then ask OpenClaw to join your call as agentar:
 

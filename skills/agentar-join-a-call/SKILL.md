@@ -19,7 +19,7 @@ Check the bridge (default port 7777):
 curl -s http://127.0.0.1:7777/api/info
 ```
 
-If that fails, ask the user to start agentar (`agentar start`, or the double-click launcher in agentar's `scripts/` folder) and keep it running for the whole call. Do not continue until `/api/info` answers.
+If that fails, ask the user to start agentar (`agentar start --daemon`, so the bridge keeps running for the whole call even after the terminal closes — or the double-click launcher in agentar's `scripts/` folder). Do not continue until `/api/info` answers.
 
 The stage URL (the camera view, with no side panel) is:
 
