@@ -11,6 +11,7 @@ import {
   PROTOCOL_VERSION,
   VOICE_PROVIDERS,
   isMood,
+  type ChatStreamEvent,
   type ClientMessage,
   type Gesture,
   type HealthResponse,
@@ -18,6 +19,7 @@ import {
   type ServerMessage,
   type VoiceProvider,
 } from "@agentar/core";
+import { CHAT_ERROR_STATUS, ChatError, ChatService, parseChatRequest, type ChatServiceOptions } from "./chat/index.js";
 import { defaultCliPath, defaultModelsDir, defaultWebDir } from "./models.js";
 import { SpeechQueue, type RenderedAudio } from "./speech-queue.js";
 import { ConfigStore, agentarHome } from "./store.js";
@@ -43,6 +45,8 @@ export interface BridgeOptions {
   homeDir?: string;
   /** Override TTS engines (tests). */
   providers?: Partial<Record<VoiceProvider, TtsProvider>>;
+  /** Chat connector options (timeouts, where API keys come from). */
+  chat?: ChatServiceOptions;
   log?: (msg: string) => void;
 }
 
@@ -95,6 +99,8 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
     elevenlabs: opts.providers?.elevenlabs ?? new ElevenLabsTts(),
     xai: opts.providers?.xai ?? new XaiTts(),
   };
+
+  const chat = new ChatService(opts.chat);
 
   let publicUrl = "";
   const audio = new Map<string, { data: Buffer; mime: string; expires: number }>();
@@ -204,6 +210,47 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
       const result = await queue.say(body);
       const status = result.status === "error" ? 502 : result.status === "no-clients" ? 409 : 200;
       return sendJson(res, status, result);
+    }
+
+    if (path === "/api/chat/config") {
+      if (method === "GET") return sendJson(res, 200, chat.view(store.getChat()));
+      if (method === "PUT" || method === "PATCH") {
+        return sendJson(res, 200, chat.view(await store.updateChat(await readJson(req))));
+      }
+    }
+
+    if (path === "/api/chat" && method === "POST") {
+      const body = parseChatRequest(await readJson(req));
+      if (typeof body === "string") return sendJson(res, 400, { error: body, code: "bad-request" });
+      // Stop waiting on the agent when the caller goes away.
+      const abort = new AbortController();
+      res.on("close", () => {
+        if (!res.writableEnded) abort.abort();
+      });
+      // Streamed replies are NDJSON lines. Headers go out with the first
+      // delta, so failures before any text still get a real status code.
+      let streaming = false;
+      const line = (event: ChatStreamEvent) => JSON.stringify(event) + "\n";
+      const onDelta = body.stream
+        ? (text: string) => {
+            if (!streaming) {
+              res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" });
+              streaming = true;
+            }
+            res.write(line({ type: "delta", text }));
+          }
+        : undefined;
+      try {
+        const result = await chat.send(store.getChat(), body, { signal: abort.signal, onDelta });
+        if (streaming) return void res.end(line({ type: "done", ...result }));
+        return sendJson(res, 200, result);
+      } catch (err) {
+        const e = err instanceof ChatError ? err : new ChatError("upstream", (err as Error).message);
+        if (e.code !== "aborted") log(`chat (${body.connector ?? store.getChat().connector}) failed: ${e.message}`);
+        if (streaming) return void res.end(line({ type: "error", error: e.message, code: e.code }));
+        if (res.writableEnded || res.destroyed) return;
+        return sendJson(res, CHAT_ERROR_STATUS[e.code], { error: e.message, code: e.code });
+      }
     }
 
     if (path === "/api/stop" && method === "POST") {
