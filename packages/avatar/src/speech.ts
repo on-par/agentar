@@ -66,6 +66,7 @@ export class SpeechPlayer {
   private generation = 0;
   private ctx: AudioContext | null = null;
   private spectrum: Uint8Array<ArrayBuffer> = new Uint8Array(new ArrayBuffer(0));
+  private capture: MediaStreamAudioDestinationNode | null = null;
 
   /** Must be called from a user gesture at least once to unlock audio. */
   async unlock(): Promise<void> {
@@ -84,6 +85,17 @@ export class SpeechPlayer {
 
   get speaking(): boolean {
     return this.playback !== null;
+  }
+
+  /** Tap playback audio for recording. The track stays live (and silent between utterances). */
+  captureAudio(): MediaStream {
+    if (!this.capture) this.capture = this.audioContext().createMediaStreamDestination();
+    return this.capture.stream;
+  }
+
+  releaseCapture(): void {
+    this.capture?.disconnect();
+    this.capture = null;
   }
 
   async play(utt: Utterance, voice: VoiceSettings): Promise<PlayResult> {
@@ -116,8 +128,9 @@ export class SpeechPlayer {
 
     if (p.kind === "audio") {
       const ctx = this.audioContext();
-      // Account for output latency so lips match what the user hears.
-      const latency = (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
+      // Account for output latency so lips match what the user hears. While
+      // recording, lips follow the recorded (not the heard) audio instead.
+      const latency = this.capture ? 0 : (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
       const t = ctx.currentTime - p.startAt - latency;
       if (t < 0) return { speaking: true, visemes: {}, energy: 0 };
       const energy = envelopeAt(p.envelope, t);
@@ -172,6 +185,7 @@ export class SpeechPlayer {
     source.connect(analyser);
     analyser.connect(gain);
     gain.connect(ctx.destination);
+    if (this.capture) gain.connect(this.capture);
 
     let finish!: (r: PlayResult) => void;
     const done = new Promise<PlayResult>((resolve) => (finish = resolve));

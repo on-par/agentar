@@ -45,11 +45,14 @@ export type ServerMessage =
   | { type: "speak"; utterance: Utterance }
   | { type: "stop" }
   | { type: "mood"; mood: Mood }
-  | { type: "gesture"; gesture: Gesture };
+  | { type: "gesture"; gesture: Gesture }
+  | { type: "record-start"; id: string }
+  | { type: "record-stop"; id: string };
 
 export type ClientMessage =
   | { type: "speech-start"; id: string }
-  | { type: "speech-end"; id: string; interrupted?: boolean; error?: string };
+  | { type: "speech-end"; id: string; interrupted?: boolean; error?: string }
+  | { type: "record-error"; id: string; error: string };
 
 /** POST /api/say */
 export interface SayRequest {
@@ -78,4 +81,19 @@ export interface HealthResponse {
   name: "agentar";
   version: string;
   clients: number;
+}
+
+/** POST /api/record/start */
+export interface RecordStartResponse {
+  id: string;
+  status: "recording";
+  warning?: string;
+}
+
+/** POST /api/record/stop */
+export interface RecordStopResponse {
+  id: string;
+  path: string;
+  mime: string;
+  bytes: number;
 }

@@ -504,6 +504,76 @@ describe("chat", () => {
   });
 });
 
+describe("recording", () => {
+  it("refuses to start with no avatar connected", async () => {
+    const res = await post("/api/record/start", {});
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: expect.stringMatching(/No avatar page is open/) });
+  });
+
+  it("records a clip end to end", async () => {
+    const avatar = await connectAvatar();
+    const startRes = await post("/api/record/start", {});
+    expect(startRes.status).toBe(200);
+    const { id } = await startRes.json();
+    expect(id).toEqual(expect.any(String));
+
+    const started = await avatar.next("record-start");
+    expect(started).toEqual({ type: "record-start", id });
+
+    const chunk1 = await api(`/api/record/${id}/chunk`, { method: "POST", headers: { "Content-Type": "video/webm" }, body: "abc" });
+    expect(await chunk1.json()).toMatchObject({ ok: true, bytes: 3 });
+    const chunk2 = await api(`/api/record/${id}/chunk`, { method: "POST", headers: { "Content-Type": "video/webm" }, body: "def" });
+    expect(await chunk2.json()).toMatchObject({ ok: true, bytes: 3 });
+
+    const stopping = post("/api/record/stop", {});
+    const stopped = await avatar.next("record-stop");
+    expect(stopped).toEqual({ type: "record-stop", id });
+
+    const final = await api(`/api/record/${id}/chunk?final=1`, { method: "POST", headers: { "Content-Type": "video/webm" }, body: "" });
+    expect(await final.json()).toMatchObject({ ok: true, bytes: 0 });
+
+    const stopRes = await stopping;
+    expect(stopRes.status).toBe(200);
+    const body = await stopRes.json();
+    expect(body).toMatchObject({ id, mime: "video/webm", bytes: 6 });
+    expect(body.path).toContain(join(home, "recordings"));
+    expect(await readFile(body.path, "utf8")).toBe("abcdef");
+
+    const before = await stat(body.path);
+    const second = await post("/api/record/stop", {});
+    expect(second.status).toBe(409);
+    const after = await stat(body.path);
+    expect(after.size).toBe(before.size);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    avatar.ws.close();
+  });
+
+  it("fails a pending stop with 502 when the avatar reports record-error", async () => {
+    const avatar = await connectAvatar();
+    const { id } = await (await post("/api/record/start", {})).json();
+    await avatar.next("record-start");
+    await api(`/api/record/${id}/chunk`, { method: "POST", headers: { "Content-Type": "video/webm" }, body: "abc" });
+
+    const stopping = post("/api/record/stop", {});
+    await avatar.next("record-stop");
+    avatar.ws.send(JSON.stringify({ type: "record-error", id, error: "camera went away" }));
+
+    const res = await stopping;
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: "camera went away" });
+    avatar.ws.close();
+  });
+
+  it("warns that the browser voice cannot be captured", async () => {
+    await bridge.store.update({ voice: { provider: "browser" } });
+    const avatar = await connectAvatar();
+    const res = await post("/api/record/start", {});
+    expect(await res.json()).toMatchObject({ status: "recording", warning: expect.stringMatching(/browser voice cannot be captured/) });
+    avatar.ws.close();
+  });
+});
+
 describe("parseSayVoices", () => {
   it("parses macOS voice list lines", () => {
     const out = "Albert              en_US    # Hello! My name is Albert.\nEddy (English (UK)) en_GB    # Hello! My name is Eddy.\n";

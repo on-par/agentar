@@ -21,6 +21,7 @@ import {
 } from "@agentar/core";
 import { CHAT_ERROR_STATUS, ChatError, ChatService, parseChatRequest, type ChatServiceOptions } from "./chat/index.js";
 import { defaultCliPath, defaultModelsDir, defaultWebDir } from "./models.js";
+import { RecordingManager } from "./recording.js";
 import { SpeechQueue, type RenderedAudio } from "./speech-queue.js";
 import { ConfigStore, agentarHome } from "./store.js";
 import { ElevenLabsTts, OpenAiTts, XaiTts } from "./tts/cloud.js";
@@ -63,6 +64,7 @@ export interface Bridge {
   port: number;
   store: ConfigStore;
   queue: SpeechQueue;
+  recorder: RecordingManager;
   close(): Promise<void>;
 }
 
@@ -84,6 +86,7 @@ const MIME: Record<string, string> = {
 
 const MAX_JSON = 256 * 1024;
 const MAX_MODEL = 150 * 1024 * 1024;
+const MAX_CHUNK = 64 * 1024 * 1024;
 const MAX_TEXT = 5000;
 const AUDIO_TTL_MS = 10 * 60 * 1000;
 
@@ -114,10 +117,27 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
   let publicUrl = "";
   const audio = new Map<string, { data: Buffer; mime: string; expires: number }>();
   const clients = new Map<WebSocket, { id: string }>();
+  const recorder = new RecordingManager(join(home, "recordings"));
 
   const broadcast = (msg: ServerMessage) => {
     const data = JSON.stringify(msg);
     for (const ws of clients.keys()) if (ws.readyState === ws.OPEN) ws.send(data);
+  };
+
+  const sendTo = (ws: WebSocket, msg: ServerMessage) => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
+  };
+
+  /** The most recently connected avatar client (last entry in Map insertion order). */
+  const lastClient = (): { ws: WebSocket; id: string } | null => {
+    let last: { ws: WebSocket; id: string } | null = null;
+    for (const [ws, info] of clients) last = { ws, id: info.id };
+    return last;
+  };
+
+  const findClient = (id: string): WebSocket | null => {
+    for (const [ws, info] of clients) if (info.id === id) return ws;
+    return null;
   };
 
   /**
@@ -305,6 +325,38 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
       }
     }
 
+    if (path === "/api/record/start" && method === "POST") {
+      const last = lastClient();
+      if (!last) return sendJson(res, 409, { error: "No avatar page is open. Open the agentar page (or ?stage=1) first." });
+      const { id } = recorder.start(last.id);
+      sendTo(last.ws, { type: "record-start", id });
+      const warning = store.get().voice.provider === "browser" ? "The browser voice cannot be captured; the recording will have silent audio." : undefined;
+      return sendJson(res, 200, { id, status: "recording", ...(warning ? { warning } : {}) });
+    }
+
+    if (path === "/api/record/stop" && method === "POST") {
+      try {
+        const active = recorder.active;
+        if (active) {
+          const owner = findClient(active.clientId);
+          if (owner) sendTo(owner, { type: "record-stop", id: active.id });
+        }
+        return sendJson(res, 200, await recorder.stop());
+      } catch (err) {
+        const e = err as { status?: number; message: string; path?: string };
+        return sendJson(res, e.status ?? 500, { error: e.message, ...(e.path ? { path: e.path } : {}) });
+      }
+    }
+
+    const chunkMatch = /^\/api\/record\/([\w-]+)\/chunk$/.exec(path);
+    if (chunkMatch && method === "POST") {
+      const data = await readBody(req, MAX_CHUNK);
+      const mime = req.headers["content-type"] ?? "video/webm";
+      const final = url.searchParams.get("final") === "1";
+      await recorder.appendChunk(chunkMatch[1]!, data, mime, final);
+      return sendJson(res, 200, { ok: true, bytes: data.length });
+    }
+
     const audioMatch = /^\/api\/audio\/([\w-]+)$/.exec(path);
     if (audioMatch && method === "GET") {
       const clip = audio.get(audioMatch[1]!);
@@ -436,10 +488,15 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
       if (msg.type === "speech-end" && typeof msg.id === "string") {
         queue.speechEnded(msg.id, Boolean(msg.interrupted), typeof msg.error === "string" ? msg.error : undefined);
       }
+      if (msg.type === "record-error" && typeof msg.id === "string") {
+        recorder.fail(msg.id, String(msg.error));
+      }
     });
     ws.on("close", () => {
       clients.delete(ws);
       log(`avatar disconnected (${clients.size} left)`);
+      const active = recorder.active;
+      if (active?.clientId === clientId) recorder.fail(active.id, "The recording page disconnected");
     });
   });
 
@@ -460,9 +517,11 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
     port: actualPort,
     store,
     queue,
+    recorder,
     close: () =>
       new Promise<void>((r) => {
         queue.stop();
+        recorder.abort();
         for (const ws of clients.keys()) ws.terminate();
         wss.close();
         server.close(() => r());

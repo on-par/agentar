@@ -3,6 +3,7 @@ import { Avatar, Stage, type AvatarSource } from "@agentar/avatar";
 import { BUILTIN_MODELS, DEFAULT_CONFIG, mergeConfig, type AvatarConfig, type Mood, type Utterance } from "@agentar/core";
 import { BridgeClient } from "./bridge-client.js";
 import { Panel, safeStorage } from "./panel.js";
+import { StageRecorder } from "./recorder.js";
 
 const params = new URLSearchParams(location.search);
 /** Clean view for OBS / virtual cameras: no panel, no orbit controls. */
@@ -24,6 +25,20 @@ const unlockEl = $("#unlock");
 
 const stage = new Stage(stageEl, { interactive: !stageMode });
 const client = new BridgeClient();
+const recorder = new StageRecorder({
+  canvas: stage.renderer.domElement,
+  speech: stage.speech,
+  MediaRecorder,
+  upload: (id, chunk, final) =>
+    fetch(`/api/record/${id}/chunk${final ? "?final=1" : ""}`, {
+      method: "POST",
+      headers: { "Content-Type": chunk.type || "video/webm" },
+      body: chunk,
+    }).then((res) => {
+      if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+    }),
+  reportError: (id, error) => client.send({ type: "record-error", id, error }),
+});
 let config: AvatarConfig = DEFAULT_CONFIG;
 let loadedModelKey = "";
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -189,6 +204,13 @@ client.onMessage = (msg) => {
       break;
     case "gesture":
       stage.currentAvatar?.playGesture(msg.gesture);
+      break;
+    case "record-start":
+      void stage.speech.unlock();
+      recorder.start(msg.id);
+      break;
+    case "record-stop":
+      void recorder.stop(msg.id);
       break;
   }
 };
