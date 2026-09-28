@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,28 +9,38 @@ import { parseSayVoices } from "./tts/system.js";
 import type { TtsProvider } from "./tts/types.js";
 
 class FakeTts implements TtsProvider {
-  readonly id = "system";
   calls: string[] = [];
+  /** The engine's binary is not installed. */
+  missing = false;
+  /** The engine is installed but cannot render (say, no internet). */
+  broken = false;
+  constructor(
+    readonly id = "system",
+    private readonly mime = "audio/wav",
+  ) {}
   async unavailableReason() {
-    return null;
+    return this.missing ? `${this.id} is not installed` : null;
   }
   async listVoices() {
     return [{ id: "Fake", name: "Fake", language: "en-US" }];
   }
   async synthesize(text: string, _voice: VoiceSettings) {
+    if (this.missing || this.broken) throw new Error(`${this.id} failed`);
     this.calls.push(text);
-    return { data: Buffer.from("RIFFfake"), mime: "audio/wav" };
+    return { data: Buffer.from("RIFFfake"), mime: this.mime };
   }
 }
 
 let bridge: Bridge;
 let home: string;
 let tts: FakeTts;
+let edge: FakeTts;
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "agentar-test-"));
   tts = new FakeTts();
-  bridge = await startBridge({ port: 0, homeDir: home, providers: { system: tts }, log: () => undefined });
+  edge = new FakeTts("edge", "audio/mpeg");
+  bridge = await startBridge({ port: 0, homeDir: home, providers: { system: tts, edge }, log: () => undefined });
 });
 
 afterEach(async () => {
@@ -211,6 +221,77 @@ describe("speaking", () => {
     await post("/api/mood", { mood: "thinking" });
     expect(await avatar.next("mood")).toEqual({ type: "mood", mood: "thinking" });
     expect((await post("/api/gesture", { gesture: "dance" })).status).toBe(400);
+    avatar.ws.close();
+  });
+});
+
+describe("voice fallback", () => {
+  /** Restart the bridge, as on a machine where the system engine is not installed. */
+  async function restartWithoutSystemVoice(): Promise<void> {
+    await bridge.close();
+    tts = Object.assign(new FakeTts(), { missing: true });
+    bridge = await startBridge({ port: 0, homeDir: home, providers: { system: tts, edge }, log: () => undefined });
+  }
+
+  const savedConfig = async () => JSON.parse(await readFile(join(home, "config.json"), "utf8")) as { voice: VoiceSettings };
+
+  it("switches a missing system engine to the browser on start and saves it", async () => {
+    edge.missing = true;
+    await restartWithoutSystemVoice();
+    expect(bridge.store.get().voice.provider).toBe("browser");
+    expect((await savedConfig()).voice.provider).toBe("browser");
+
+    const avatar = await connectAvatar();
+    const res = await post("/api/say", { text: "Hello" });
+    expect(res.status).toBe(200);
+    const speak = await avatar.next("speak");
+    expect(speak.type === "speak" && speak.utterance.audio).toBeUndefined();
+    avatar.ws.close();
+  });
+
+  it("prefers edge-tts over the browser when it is installed", async () => {
+    await restartWithoutSystemVoice();
+    expect(bridge.store.get().voice.provider).toBe("edge");
+
+    const avatar = await connectAvatar();
+    await post("/api/say", { text: "Hello" });
+    const speak = await avatar.next("speak");
+    expect(speak.type === "speak" && speak.utterance.audio?.mime).toBe("audio/mpeg");
+    expect(edge.calls).toEqual(["Hello"]);
+    avatar.ws.close();
+  });
+
+  it("falls back when the system engine disappears after start, and tells every view", async () => {
+    const avatar = await connectAvatar();
+    tts.missing = true;
+    const res = await post("/api/say", { text: "Still here" });
+    expect(res.status).toBe(200);
+    const config = await avatar.next("config");
+    expect(config.type === "config" && config.config.voice.provider).toBe("edge");
+    const speak = await avatar.next("speak");
+    expect(speak.type === "speak" && speak.utterance.audio?.mime).toBe("audio/mpeg");
+    avatar.ws.close();
+  });
+
+  it("moves on to the browser when the fallback edge-tts cannot render", async () => {
+    edge.broken = true;
+    const avatar = await connectAvatar();
+    tts.missing = true;
+    const res = await post("/api/say", { text: "Hello" });
+    expect(res.status).toBe(200);
+    const speak = await avatar.next("speak");
+    expect(speak.type === "speak" && speak.utterance.audio).toBeUndefined();
+    expect(bridge.store.get().voice.provider).toBe("browser");
+    avatar.ws.close();
+  });
+
+  it("reports errors from an installed engine instead of switching", async () => {
+    const avatar = await connectAvatar();
+    tts.broken = true;
+    const res = await post("/api/say", { text: "Hello" });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ status: "error", error: "system failed" });
+    expect(bridge.store.get().voice.provider).toBe("system");
     avatar.ws.close();
   });
 });

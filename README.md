@@ -6,6 +6,23 @@ agentar is a customizable, realistic 3D avatar for the agent you already use: Cl
 
 It runs locally in your browser with [three.js](https://threejs.org) and WebGL. The default voice is your operating system's own speech engine, so you need no API keys or cloud account.
 
+## For everyone
+
+You need [Node.js](https://nodejs.org) 24 or newer. Then:
+
+1. Start Agentar:
+   - **macOS**: double-click `scripts/Agentar.command` in Finder.
+   - **Linux**: run `scripts/agentar-start.sh` (or double-click it in your file manager).
+   - **Windows**: double-click `scripts\agentar-start.cmd`.
+   - **No checkout?** Run `npx agentar@0.1.0 start`.
+2. Your browser opens the avatar. The first start installs and builds everything, so it takes a few minutes.
+3. Click the page once, so the browser allows sound.
+4. On the **Talk** tab, type something and press **Speak**.
+
+To have your agent talk through the avatar, see [Talking agents](#talking-agents-people-path).
+
+If your computer has no built-in speech engine (for example Linux without `espeak-ng`), Agentar switches to Microsoft Edge voices when [`edge-tts`](https://github.com/rany2/edge-tts) is installed, and to the browser's own voice otherwise.
+
 ## Quick start
 
 ```bash
@@ -31,7 +48,17 @@ For development with hot reload:
 npm run dev            # bridge on :7777 and Vite on http://localhost:5173
 ```
 
-## Connect your agent
+## Talking agents (people path)
+
+**OpenClaw**, **Hermes**, **Grok Bot**, **Muse**, or any agent that can send a web request can make the avatar speak. Have the agent POST each reply to the bridge:
+
+```bash
+curl -X POST localhost:7777/api/say -H 'Content-Type: application/json' -d '{"text":"Hi! I am here.","mood":"happy"}'
+```
+
+Optional fields: `mood`, `wait: true` (answer after the avatar finishes speaking), and `interrupt: false` (queue the reply instead of cutting in). A plain-text body (`Content-Type: text/plain`) also works. The **Connect** tab shows this command with the correct address.
+
+## Connect your agent (builders)
 
 The **Connect** tab in the app shows these commands with the correct paths already filled in. From a checkout, use `node <repo>/packages/cli/dist/index.js` in place of `agentar`.
 
@@ -50,7 +77,7 @@ Before speaking, agentar rewrites markdown for the ear. It removes code blocks, 
 
 - **Look**: body model (built-in or your own `.glb`/`.vrm` upload), and the colors of skin, hair, eyes, top, bottom, and shoes. Colors are re-tinted in the shader, so the texture detail stays. Also glasses, hats, and height.
 - **Voice**: engine and voice, speed, pitch, and volume.
-  - `system`: offline, uses the macOS `say`, Linux `espeak-ng`, or Windows SAPI voices.
+  - `system`: offline, uses the macOS `say`, Linux `espeak-ng`, or Windows SAPI voices. It is the default. If the engine is not installed, Agentar switches to `edge` (when installed) or `browser`, and saves that choice.
   - `browser`: the Web Speech API.
   - `edge`: Microsoft Edge's online neural voices. They sound much more natural than `say`. Install the free [`edge-tts`](https://github.com/rany2/edge-tts) CLI (`pipx install edge-tts` or `uv tool install edge-tts`). It needs internet, but no API key. If `edge-tts` is not on your `PATH`, set `AGENTAR_EDGE_TTS` to its full path.
   - `openai`: needs `OPENAI_API_KEY`.

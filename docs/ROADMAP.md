@@ -12,7 +12,15 @@
 - Agent integration: MCP server, Claude Code Stop hook, Codex notify hook, and an HTTP API
 - OBS stage view for virtual cameras
 
+## Shipped since v0.1
+
+- **Consumer simple start**: double-click launchers in `scripts/` (`Agentar.command`, `agentar-start.sh`, `agentar-start.cmd`) that install, build, and open the avatar.
+- **TTS fallback**: when the OS speech engine is missing, the bridge switches to Edge voices or the browser's own voice instead of failing.
+- **Talking agents (people path)** in the Connect tab and README: OpenClaw, Hermes, Grok Bot, and Muse speak through `POST /api/say`.
+
 ## Next
+
+- **Chat over HTTP with named connectors** (next PR): a Chat tab and a chat endpoint, with first-class connectors for OpenClaw, Hermes, Grok Bot, and Muse, so people can talk to their agent from the avatar page.
 
 - **Better lip-sync accuracy**
   - Use provider timestamps (ElevenLabs `with-timestamps`, Azure viseme events) when they are available.
