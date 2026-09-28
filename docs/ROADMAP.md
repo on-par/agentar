@@ -53,5 +53,6 @@ Ship sequence (locked): **Cut A** (shipped, [#1](https://github.com/on-par/agent
 2. **Bundled virtual camera**: an Electron or Tauri shell that renders offscreen and publishes a virtual camera and microphone directly. Still a human-client camera, so it also covers Discord.
 3. **Meeting bot** (in progress): the agent joins as its own participant.
    - **Recall.ai spike (documented)**: Recall's Output Media loads the public stage (`/?stage=1` over an HTTPS tunnel) as the bot's camera and microphone in Zoom, Meet, Teams, or Webex. The bridge accepts the tunnel through `AGENTAR_ALLOWED_ORIGINS`. Not yet proven against a live call. See [Meeting bot (Recall spike)](meetings.md#meeting-bot-recall-spike) and the [`agentar-recall-zoom`](../skills/agentar-recall-zoom/SKILL.md) skill.
+   - **WebRTC participant (platform chosen)**: LiveKit is the proposed v1 target for publishing the stage as its own participant. See [WebRTC platform decision](decisions/webrtc-platform-selection.md).
    - Next: send transcribed meeting audio back to the agent.
    - Deferred: the Zoom Meeting SDK / Teams bot framework (native video frames, own infrastructure, app review), unless Recall does not work out.
