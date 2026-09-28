@@ -64,6 +64,8 @@ The stage can also join a [LiveKit](https://livekit.io) room as its own particip
 
 The bridge never logs the token. The `browser` voice provider cannot be captured, so with it the room hears silence (the join response includes a `warning`).
 
+The stage rejoins the room on its own after a short network drop, with no page reload or restart, and republishes a live canvas track so the room does not keep a frozen frame. `curl localhost:7777/api/status` shows the room connection: `room.state` is `disconnected` (with `rejoining: true`) until the stage is back, then `connected`. It is `not-joined` when no join is active. If the stage gives up (after about 30 seconds, or because the token expired), `rejoining` is `false` and `error` says why. POST `/api/leave`, then join again with a fresh token.
+
 ## Meeting bot (Recall spike)
 
 A [Recall.ai](https://www.recall.ai) bot joins the meeting as its own participant. Recall's [Output Media](https://docs.recall.ai/docs/stream-media) loads a webpage in the bot's browser and sends it into the call as the bot's camera (1280×720 at 15 fps) and microphone. Point it at the agentar stage, and the avatar's face and voice come from the bot, not from your computer.
