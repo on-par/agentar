@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Bridge, BridgeOptions } from "@agentar/bridge";
 import { isMood, type HealthResponse, type Mood, type RecordStartResponse, type RecordStopResponse } from "@agentar/core";
+import { startBridgeWithModels } from "./bridge.js";
 
 export interface RecordOptions {
   /** Path to a UTF-8 text file with what the avatar should say. */
@@ -104,16 +105,9 @@ export function headlessChromeArgs(url: string, userDataDir: string, platform: N
   ];
 }
 
-async function defaultStartBridge(opts: BridgeOptions): Promise<Pick<Bridge, "url" | "close">> {
-  const { defaultModelsDir, fetchModels, startBridge } = await import("@agentar/bridge");
-  const modelsDir = opts.modelsDir ?? process.env.AGENTAR_MODELS_DIR ?? defaultModelsDir();
-  await fetchModels(modelsDir, { quiet: true });
-  return startBridge({ ...opts, modelsDir });
-}
-
 function defaultDeps(): RecordDeps {
   return {
-    startBridge: defaultStartBridge,
+    startBridge: startBridgeWithModels,
     launchChrome: (bin, args) => spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] }),
     fetch: (...args) => fetch(...args),
     findChrome: () => findChrome(),

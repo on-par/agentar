@@ -91,11 +91,9 @@ async function start(args: string[]): Promise<number> {
   if (args.includes("--daemon")) return startDaemon(args.filter((a) => a !== "--daemon"));
   const portIdx = args.indexOf("--port");
   const port = portIdx >= 0 ? Number(args[portIdx + 1]) : undefined;
-  const { defaultModelsDir, fetchModels, startBridge } = await import("@agentar/bridge");
+  const { startBridgeWithModels } = await import("./bridge.js");
   // First run: download the default (CC0) avatar so the page has something to show.
-  const modelsDir = process.env.AGENTAR_MODELS_DIR ?? defaultModelsDir();
-  await fetchModels(modelsDir, { quiet: true });
-  const bridge = await startBridge({ ...(port ? { port } : {}), modelsDir, cliPath: CLI_PATH });
+  const bridge = await startBridgeWithModels({ ...(port ? { port } : {}), cliPath: CLI_PATH });
   console.log(`\n  agentar is running → ${bridge.url}\n  OBS / virtual camera view → ${bridge.url}/?stage=1\n`);
   if (!args.includes("--no-open")) openBrowser(bridge.url);
   const daemonMode = process.env.AGENTAR_DAEMON === "1";
