@@ -26,6 +26,7 @@ import { ConfigStore, agentarHome } from "./store.js";
 import { ElevenLabsTts, OpenAiTts, XaiTts } from "./tts/cloud.js";
 import { EdgeTts } from "./tts/edge.js";
 import { chooseFallback } from "./tts/fallback.js";
+import { KokoroTts } from "./tts/kokoro.js";
 import { SystemTts } from "./tts/system.js";
 import type { SynthesisResult, TtsProvider } from "./tts/types.js";
 
@@ -95,6 +96,7 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
   const providers: Record<Exclude<VoiceProvider, "browser">, TtsProvider> = {
     system: opts.providers?.system ?? new SystemTts(),
     edge: opts.providers?.edge ?? new EdgeTts(),
+    kokoro: opts.providers?.kokoro ?? new KokoroTts(),
     openai: opts.providers?.openai ?? new OpenAiTts(),
     elevenlabs: opts.providers?.elevenlabs ?? new ElevenLabsTts(),
     xai: opts.providers?.xai ?? new XaiTts(),
@@ -117,8 +119,10 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
    * Returns false when `failed` should keep its error instead.
    */
   const fallBack = async (failed: VoiceProvider, viaFallback: boolean): Promise<boolean> => {
+    const kokoroMissing = failed === "kokoro" && (await providers.kokoro.unavailableReason()) !== null;
     const next = chooseFallback(failed, {
-      systemMissing: failed === "system" && (await providers.system.unavailableReason()) !== null,
+      systemMissing: (failed === "system" || kokoroMissing) && (await providers.system.unavailableReason()) !== null,
+      kokoroMissing,
       edgeReady: failed !== "edge" && (await providers.edge.unavailableReason()) === null,
       viaFallback,
     });
@@ -144,10 +148,12 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
     }
   };
 
-  // The default engine needs an OS binary that Linux often lacks. Pick one
-  // that works before the first `say` instead of failing it.
-  if (store.get().voice.provider === "system") {
-    await fallBack("system", false).catch((err: unknown) => log(`voice check failed: ${(err as Error).message}`));
+  // The default engine needs an OS binary that Linux often lacks, and Kokoro
+  // needs a local server. Pick one that works before the first `say` instead
+  // of failing it.
+  const saved = store.get().voice.provider;
+  if (saved === "system" || saved === "kokoro") {
+    await fallBack(saved, false).catch((err: unknown) => log(`voice check failed: ${(err as Error).message}`));
   }
 
   const queue = new SpeechQueue({

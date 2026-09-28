@@ -21,7 +21,7 @@ export type Glasses = (typeof GLASSES)[number];
 export const HATS = ["none", "beanie", "cap"] as const;
 export type Hat = (typeof HATS)[number];
 
-export const VOICE_PROVIDERS = ["system", "browser", "edge", "openai", "elevenlabs", "xai"] as const;
+export const VOICE_PROVIDERS = ["system", "browser", "edge", "kokoro", "openai", "elevenlabs", "xai"] as const;
 export type VoiceProvider = (typeof VOICE_PROVIDERS)[number];
 
 export const FRAMINGS = ["head", "bust", "full"] as const;

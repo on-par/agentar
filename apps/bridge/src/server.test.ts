@@ -286,6 +286,81 @@ describe("voice fallback", () => {
     avatar.ws.close();
   });
 
+  describe("kokoro", () => {
+    let kokoro: FakeTts;
+
+    /** Restart the bridge with Kokoro chosen, as after picking it in the Voice tab. */
+    async function restartWithKokoro(patch: { missing?: boolean; broken?: boolean } = {}): Promise<void> {
+      await bridge.store.update({ voice: { provider: "kokoro", voice: "af_heart" } });
+      await bridge.close();
+      kokoro = Object.assign(new FakeTts("kokoro", "audio/mpeg"), patch);
+      bridge = await startBridge({ port: 0, homeDir: home, providers: { system: tts, edge, kokoro }, log: () => undefined });
+    }
+
+    it("speaks with a running Kokoro server", async () => {
+      await restartWithKokoro();
+      expect(bridge.store.get().voice.provider).toBe("kokoro");
+      const avatar = await connectAvatar();
+      await post("/api/say", { text: "Hello" });
+      const speak = await avatar.next("speak");
+      expect(speak.type === "speak" && speak.utterance.audio?.mime).toBe("audio/mpeg");
+      expect(kokoro.calls).toEqual(["Hello"]);
+      expect(tts.calls).toEqual([]);
+      avatar.ws.close();
+    });
+
+    it("switches to the system engine on start when no Kokoro server answers, and saves it", async () => {
+      await restartWithKokoro({ missing: true });
+      expect(bridge.store.get().voice).toMatchObject({ provider: "system", voice: "" });
+      expect((await savedConfig()).voice.provider).toBe("system");
+    });
+
+    it("switches to edge-tts when neither Kokoro nor the system engine is available", async () => {
+      tts.missing = true;
+      await restartWithKokoro({ missing: true });
+      expect(bridge.store.get().voice.provider).toBe("edge");
+    });
+
+    it("switches to the browser when nothing else is available", async () => {
+      tts.missing = true;
+      edge.missing = true;
+      await restartWithKokoro({ missing: true });
+      expect(bridge.store.get().voice.provider).toBe("browser");
+    });
+
+    it("falls back when the Kokoro server stops after start, and tells every view", async () => {
+      await restartWithKokoro();
+      const avatar = await connectAvatar();
+      kokoro.missing = true;
+      const res = await post("/api/say", { text: "Still here" });
+      expect(res.status).toBe(200);
+      const config = await avatar.next("config");
+      expect(config.type === "config" && config.config.voice.provider).toBe("system");
+      const speak = await avatar.next("speak");
+      expect(speak.type === "speak" && speak.utterance.audio?.mime).toBe("audio/wav");
+      expect(tts.calls).toEqual(["Still here"]);
+      avatar.ws.close();
+    });
+
+    it("reports errors from a running Kokoro server instead of switching", async () => {
+      await restartWithKokoro({ broken: true });
+      const avatar = await connectAvatar();
+      const res = await post("/api/say", { text: "Hello" });
+      expect(res.status).toBe(502);
+      expect(await res.json()).toMatchObject({ status: "error", error: "kokoro failed" });
+      expect(bridge.store.get().voice.provider).toBe("kokoro");
+      avatar.ws.close();
+    });
+
+    it("lists why Kokoro is unavailable without switching", async () => {
+      await restartWithKokoro();
+      kokoro.missing = true;
+      const body = await (await api("/api/voices?provider=kokoro")).json();
+      expect(body).toMatchObject({ provider: "kokoro", available: false, reason: "kokoro is not installed", voices: [] });
+      expect(bridge.store.get().voice.provider).toBe("kokoro");
+    });
+  });
+
   it("reports errors from an installed engine instead of switching", async () => {
     const avatar = await connectAvatar();
     tts.broken = true;

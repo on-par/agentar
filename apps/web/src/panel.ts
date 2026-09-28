@@ -37,6 +37,7 @@ const LABELS: Record<string, string> = {
   system: "System (offline)",
   browser: "Browser (Web Speech)",
   edge: "Microsoft Edge (online)",
+  kokoro: "Kokoro (local server)",
   openai: "OpenAI",
   elevenlabs: "ElevenLabs",
   xai: "Grok (xAI)",

@@ -92,6 +92,7 @@ Before speaking, agentar rewrites markdown for the ear. It removes code blocks, 
   - `system`: offline, uses the macOS `say`, Linux `espeak-ng`, or Windows SAPI voices. It is the default. If the engine is not installed, Agentar switches to `edge` (when installed) or `browser`, and saves that choice.
   - `browser`: the Web Speech API.
   - `edge`: Microsoft Edge's online neural voices. They sound much more natural than `say`. Install the free [`edge-tts`](https://github.com/rany2/edge-tts) CLI (`pipx install edge-tts` or `uv tool install edge-tts`). It needs internet, but no API key. If `edge-tts` is not on your `PATH`, set `AGENTAR_EDGE_TTS` to its full path.
+  - `kokoro`: [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) neural voices from a local server. They sound natural, run offline, and need no API key. See [Kokoro voices](#kokoro-voices).
   - `openai`: needs `OPENAI_API_KEY`.
   - `elevenlabs`: needs `ELEVENLABS_API_KEY`.
   - `xai`: Grok voices. Needs `XAI_API_KEY` from [console.x.ai](https://console.x.ai). API usage is billed separately from a Grok app subscription.
@@ -99,6 +100,29 @@ Before speaking, agentar rewrites markdown for the ear. It removes code blocks, 
 - **Scene**: framing (head, bust, or full body), lighting, background, and captions.
 
 The bridge saves your settings to `~/.agentar/config.json`. It applies them live to every open view.
+
+### Kokoro voices
+
+Agentar does not include Kokoro. It talks to a [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) server over its OpenAI-compatible HTTP API.
+
+1. Start the server. With Docker, run:
+
+   ```bash
+   docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
+   ```
+
+   On a computer with an NVIDIA GPU, use `ghcr.io/remsky/kokoro-fastapi-gpu:latest` with `--gpus all`. To run without Docker, see the Kokoro-FastAPI README. The first start downloads the model, so it can take a few minutes.
+2. Start Agentar. On the **Voice** tab, set the engine to **Kokoro (local server)**. The default voice is `af_heart`.
+
+Agentar looks for the server at `http://127.0.0.1:8880/v1`. To use a different address, set `AGENTAR_KOKORO_BASE_URL` in the environment that runs `agentar start`. For example, some OpenClaw setups run Kokoro on port 8102:
+
+```bash
+AGENTAR_KOKORO_BASE_URL=http://127.0.0.1:8102/v1 agentar start
+```
+
+If `AGENTAR_KOKORO_BASE_URL` is not set, Agentar also reads `KOKORO_API_URL` (the full `/v1/audio/speech` address that the OpenClaw kokoro-tts skill uses). It does not read `OPENAI_TTS_BASE_URL`. To send a model name other than `kokoro`, set `AGENTAR_KOKORO_MODEL`.
+
+If no Kokoro server answers when Agentar starts or speaks, Agentar switches to `system`. If `system` is not installed either, it switches to `edge` (when installed) or `browser`. It saves that choice. After you start the server, select Kokoro again on the **Voice** tab. If the server answers but returns an error (for example, an unknown voice), Agentar shows the error and keeps Kokoro.
 
 ## How lip-sync works
 

@@ -6,7 +6,7 @@
    ▼                   ▼            ▼
  packages/mcp ──► apps/bridge (localhost:7777) ◄── packages/cli
                     │  config store (~/.agentar/config.json)
-                    │  TTS engines (system / edge / openai / elevenlabs / xai)
+                    │  TTS engines (system / edge / kokoro / openai / elevenlabs / xai)
                     │  chat connectors ──► OpenClaw / Hermes / AgentMail / any OpenAI-compatible API
                     │  speech queue + audio cache
                     ▼  WebSocket /ws  (hello, config, speak, stop, mood, gesture)
