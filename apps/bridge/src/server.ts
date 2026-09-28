@@ -16,8 +16,11 @@ import {
   type Gesture,
   type HealthResponse,
   type JoinResponse,
+  type RoomConnectionState,
+  type RoomStatus,
   type SayRequest,
   type ServerMessage,
+  type StatusResponse,
   type VoiceProvider,
 } from "@agentar/core";
 import { CHAT_ERROR_STATUS, ChatError, ChatService, parseChatRequest, type ChatServiceOptions } from "./chat/index.js";
@@ -133,7 +136,15 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
   /** Joins waiting for the avatar page's join-result, by join id. */
   const pendingJoins = new Map<string, { clientId: string; resolve: (r: JoinResult) => void }>();
   /** The room the avatar page is currently publishing into (one per bridge). */
-  let activeJoin: { id: string; clientId: string } | null = null;
+  let activeJoin: {
+    id: string;
+    clientId: string;
+    room?: string;
+    state: RoomConnectionState;
+    rejoining: boolean;
+    since: number;
+    error?: string;
+  } | null = null;
 
   const broadcast = (msg: ServerMessage) => {
     const data = JSON.stringify(msg);
@@ -236,6 +247,20 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
 
     if (path === "/api/health" && method === "GET") {
       const body: HealthResponse = { ok: true, name: "agentar", version: VERSION, clients: clients.size };
+      return sendJson(res, 200, body);
+    }
+
+    if (path === "/api/status" && method === "GET") {
+      const room: RoomStatus = activeJoin
+        ? {
+            state: activeJoin.state,
+            rejoining: activeJoin.rejoining,
+            since: new Date(activeJoin.since).toISOString(),
+            ...(activeJoin.room ? { room: activeJoin.room } : {}),
+            ...(activeJoin.error ? { error: activeJoin.error } : {}),
+          }
+        : { state: "not-joined" };
+      const body: StatusResponse = { ok: true, clients: clients.size, room };
       return sendJson(res, 200, body);
     }
 
@@ -393,7 +418,7 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
         return sendJson(res, 504, { error: "The avatar page did not answer the join in time" });
       }
       if (!outcome.ok) return sendJson(res, 502, { error: outcome.error || "Could not join the room" });
-      activeJoin = { id, clientId: last.id };
+      activeJoin = { id, clientId: last.id, room: outcome.room, state: "connected", rejoining: false, since: Date.now() };
       log(`joined room ${outcome.room ?? "(unnamed)"}`);
       const warning = store.get().voice.provider === "browser" ? "The browser voice cannot be captured; the room will hear silence." : undefined;
       const response: JoinResponse = { id, status: "joined", ...(outcome.room ? { room: outcome.room } : {}), ...(warning ? { warning } : {}) };
@@ -562,6 +587,16 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
             error: typeof msg.error === "string" ? msg.error : undefined,
           });
         }
+      }
+      // Only the page that owns the active join reports on its room connection.
+      if (msg.type === "room-state" && activeJoin?.clientId === clientId && (msg.state === "connected" || msg.state === "disconnected")) {
+        const changed = activeJoin.state !== msg.state;
+        activeJoin.state = msg.state;
+        activeJoin.rejoining = msg.rejoining === true;
+        if (typeof msg.room === "string") activeJoin.room = msg.room;
+        activeJoin.error = typeof msg.error === "string" ? msg.error : undefined;
+        activeJoin.since = Date.now();
+        if (changed) log(`room connection: ${msg.state}`);
       }
     });
     ws.on("close", () => {
