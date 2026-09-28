@@ -48,6 +48,12 @@ export interface BridgeOptions {
   providers?: Partial<Record<VoiceProvider, TtsProvider>>;
   /** Chat connector options (timeouts, where API keys come from). */
   chat?: ChatServiceOptions;
+  /**
+   * Extra browser origins allowed to call the API and open the WebSocket, such
+   * as a public HTTPS tunnel for a meeting bot. Default: AGENTAR_ALLOWED_ORIGINS
+   * (comma-separated), else none.
+   */
+  allowedOrigins?: string[];
   log?: (msg: string) => void;
 }
 
@@ -89,6 +95,7 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
   const webDir = opts.webDir ?? process.env.AGENTAR_WEB_DIR ?? defaultWebDir();
   const modelsDir = opts.modelsDir ?? process.env.AGENTAR_MODELS_DIR ?? defaultModelsDir(home);
   const cliPath = opts.cliPath ?? defaultCliPath();
+  const allowedOrigins = parseOrigins(opts.allowedOrigins ?? process.env.AGENTAR_ALLOWED_ORIGINS?.split(",") ?? []);
   const userModelsDir = join(home, "models");
   const log = opts.log ?? ((m: string) => console.log(`[agentar] ${m}`));
 
@@ -189,7 +196,7 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
     const path = url.pathname;
     const method = req.method ?? "GET";
 
-    if (!originAllowed(req)) return sendJson(res, 403, { error: "Cross-origin requests are not allowed" });
+    if (!originAllowed(req, allowedOrigins)) return sendJson(res, 403, { error: "Cross-origin requests are not allowed" });
 
     if (path === "/api/health" && method === "GET") {
       const body: HealthResponse = { ok: true, name: "agentar", version: VERSION, clients: clients.size };
@@ -405,7 +412,7 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   server.on("upgrade", (req, socket, head) => {
     const { pathname } = new URL(req.url ?? "/", "http://localhost");
-    if (pathname !== "/ws" || !originAllowed(req)) {
+    if (pathname !== "/ws" || !originAllowed(req, allowedOrigins)) {
       socket.destroy();
       return;
     }
@@ -464,19 +471,34 @@ export async function startBridge(opts: BridgeOptions = {}): Promise<Bridge> {
 }
 
 /**
- * Only same-machine pages may call the API from a browser. Requests without
- * an Origin header (curl, agents, the MCP server) are allowed; the server
- * binds to 127.0.0.1 so only local processes can reach it.
+ * Only same-machine pages (plus any opted-in origins) may call the API from a
+ * browser. Requests without an Origin header (curl, agents, the MCP server) are
+ * allowed; the server binds to 127.0.0.1 so only local processes can reach it.
  */
-function originAllowed(req: IncomingMessage): boolean {
+function originAllowed(req: IncomingMessage, allowed: ReadonlySet<string>): boolean {
   const origin = req.headers.origin;
   if (!origin || origin === "null") return !origin;
   try {
-    const { hostname } = new URL(origin);
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+    const url = new URL(origin);
+    if (allowed.has(url.origin)) return true;
+    return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
   } catch {
     return false;
   }
+}
+
+/** Normalize origins such as "https://abc.trycloudflare.com/" and drop invalid entries. */
+function parseOrigins(list: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const raw of list) {
+    try {
+      const { origin } = new URL(raw.trim());
+      if (origin !== "null") out.add(origin);
+    } catch {
+      // Ignore blanks and typos rather than refusing to start.
+    }
+  }
+  return out;
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {

@@ -29,7 +29,8 @@ Usage:
 Environment:
   AGENTAR_PORT (default ${DEFAULT_PORT}), AGENTAR_URL, AGENTAR_HOME (default ~/.agentar),
   OPENAI_API_KEY, ELEVENLABS_API_KEY, XAI_API_KEY for cloud voices,
-  AGENTAR_EDGE_TTS (path to edge-tts, if it is not on PATH).
+  AGENTAR_EDGE_TTS (path to edge-tts, if it is not on PATH),
+  AGENTAR_ALLOWED_ORIGINS (extra browser origins, such as a meeting-bot tunnel).
   AGENTAR_HOME/agentar.pid and AGENTAR_HOME/agentar.log track the --daemon process.`;
 
 async function main(argv: string[]): Promise<number> {

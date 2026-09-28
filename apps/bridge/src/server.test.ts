@@ -114,6 +114,26 @@ describe("bridge HTTP API", () => {
     expect(res.status).toBe(403);
   });
 
+  it("allows opted-in origins, such as a meeting-bot tunnel", async () => {
+    const tunnel = "https://abc.trycloudflare.com";
+    const open = await startBridge({ port: 0, homeDir: home, allowedOrigins: [`${tunnel}/`], log: () => undefined });
+    try {
+      const ok = await fetch(`${open.url}/api/health`, { headers: { Origin: tunnel } });
+      expect(ok.status).toBe(200);
+      const other = await fetch(`${open.url}/api/health`, { headers: { Origin: "https://evil.example" } });
+      expect(other.status).toBe(403);
+      const ws = new WebSocket(`${open.url.replace("http", "ws")}/ws`, { origin: tunnel });
+      const hello = await new Promise<ServerMessage>((resolve, reject) => {
+        ws.once("message", (raw) => resolve(JSON.parse(String(raw)) as ServerMessage));
+        ws.once("error", reject);
+      });
+      expect(hello.type).toBe("hello");
+      ws.close();
+    } finally {
+      await open.close();
+    }
+  });
+
   it("does not serve files outside the models directory", async () => {
     const res = await api("/models/..%2F..%2Fpackage.json");
     expect([403, 404]).toContain(res.status);
