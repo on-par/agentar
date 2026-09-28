@@ -574,6 +574,172 @@ describe("recording", () => {
   });
 });
 
+describe("join", () => {
+  const room = { url: "wss://example.livekit.cloud", token: "secret-jwt" };
+
+  /** Answer the next join sent to `avatar` with a join-result. */
+  async function answerJoin(avatar: Awaited<ReturnType<typeof connectAvatar>>, result: Record<string, unknown>) {
+    const msg = await avatar.next("join");
+    if (msg.type !== "join") throw new Error("expected join");
+    // next() leaves messages it handed to a waiter in the list; drop this one so the next join is fresh.
+    const i = avatar.messages.indexOf(msg);
+    if (i >= 0) avatar.messages.splice(i, 1);
+    avatar.ws.send(JSON.stringify({ type: "join-result", id: msg.id, ...result }));
+    return msg;
+  }
+
+  it("refuses to join when no avatar page is open", async () => {
+    const res = await post("/api/join", room);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: expect.stringMatching(/No avatar page is open/) });
+  });
+
+  it("rejects a join without a token or a room URL", async () => {
+    const avatar = await connectAvatar();
+    expect((await post("/api/join", { url: room.url })).status).toBe(400);
+    expect((await post("/api/join", { url: room.url, token: "  " })).status).toBe(400);
+    expect((await post("/api/join", { url: "not a url", token: room.token })).status).toBe(400);
+    expect((await post("/api/join", { url: "file:///etc/passwd", token: room.token })).status).toBe(400);
+    expect(avatar.messages.some((m) => m.type === "join")).toBe(false);
+    avatar.ws.close();
+  });
+
+  it("joins once the avatar page reports it connected and published", async () => {
+    const avatar = await connectAvatar();
+    const pending = post("/api/join", room);
+    const msg = await answerJoin(avatar, { ok: true, room: "r" });
+    expect(msg).toEqual({ type: "join", id: expect.any(String), url: room.url, token: room.token });
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: (msg as { id: string }).id, status: "joined", room: "r" });
+    avatar.ws.close();
+  });
+
+  it("rejects a join with invalid credentials instead of reporting joined", async () => {
+    const avatar = await connectAvatar();
+    const pending = post("/api/join", { ...room, token: "bad" });
+    await answerJoin(avatar, { ok: false, error: "invalid token" });
+    const res = await pending;
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body).toEqual({ error: "invalid token" });
+    // A failed join does not block the next one.
+    const retry = post("/api/join", room);
+    await answerJoin(avatar, { ok: true, room: "r" });
+    expect((await retry).status).toBe(200);
+    avatar.ws.close();
+  });
+
+  it("refuses a second join until leave, then joins again", async () => {
+    const avatar = await connectAvatar();
+    const first = post("/api/join", room);
+    await answerJoin(avatar, { ok: true, room: "r" });
+    expect((await first).status).toBe(200);
+
+    expect((await post("/api/join", room)).status).toBe(409);
+
+    const left = await post("/api/leave", {});
+    expect(left.status).toBe(200);
+    expect(await left.json()).toEqual({ ok: true });
+    expect(await avatar.next("leave")).toEqual({ type: "leave" });
+
+    const again = post("/api/join", room);
+    await answerJoin(avatar, { ok: true, room: "r" });
+    expect((await again).status).toBe(200);
+    avatar.ws.close();
+  });
+
+  it("treats leave without a join as a no-op", async () => {
+    const res = await post("/api/leave", {});
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, status: "not-joined" });
+  });
+
+  it("ignores a join-result from a page the join was not sent to", async () => {
+    const other = await connectAvatar();
+    const avatar = await connectAvatar();
+    const pending = post("/api/join", room);
+    const msg = await avatar.next("join");
+    if (msg.type !== "join") throw new Error("expected join");
+    other.ws.send(JSON.stringify({ type: "join-result", id: msg.id, ok: true, room: "spoofed" }));
+    await new Promise((r) => setTimeout(r, 50));
+    avatar.ws.send(JSON.stringify({ type: "join-result", id: msg.id, ok: false, error: "invalid token" }));
+    expect((await pending).status).toBe(502);
+    other.ws.close();
+    avatar.ws.close();
+  });
+
+  it("fails a pending join with 502 when the avatar page disconnects", async () => {
+    const avatar = await connectAvatar();
+    const pending = post("/api/join", room);
+    await avatar.next("join");
+    avatar.ws.close();
+    const res = await pending;
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: expect.stringMatching(/disconnected/) });
+  });
+
+  it("forgets the room when the joined avatar page disconnects, so leave is a no-op", async () => {
+    const avatar = await connectAvatar();
+    const pending = post("/api/join", room);
+    await answerJoin(avatar, { ok: true, room: "r" });
+    expect((await pending).status).toBe(200);
+    avatar.ws.close();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await (await post("/api/leave", {})).json()).toEqual({ ok: true, status: "not-joined" });
+  });
+
+  it("times out a join the avatar page never answers, and tells it to leave", async () => {
+    const quick = await startBridge({ port: 0, homeDir: home, providers: { system: tts, edge }, joinTimeoutMs: 50, log: () => undefined });
+    try {
+      const ws = new WebSocket(`${quick.url.replace("http", "ws")}/ws`);
+      const seen: ServerMessage[] = [];
+      await new Promise<void>((resolve) =>
+        ws.on("message", (raw) => {
+          seen.push(JSON.parse(String(raw)) as ServerMessage);
+          resolve();
+        }),
+      );
+      const res = await fetch(`${quick.url}/api/join`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(room) });
+      expect(res.status).toBe(504);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(seen.map((m) => m.type)).toEqual(["hello", "join", "leave"]);
+      ws.close();
+    } finally {
+      await quick.close();
+    }
+  });
+
+  it("warns on join that the browser voice cannot be captured", async () => {
+    await bridge.store.update({ voice: { provider: "browser" } });
+    const avatar = await connectAvatar();
+    const pending = post("/api/join", room);
+    await answerJoin(avatar, { ok: true, room: "r" });
+    expect(await (await pending).json()).toMatchObject({ status: "joined", warning: expect.stringMatching(/browser voice cannot be captured/) });
+    avatar.ws.close();
+  });
+
+  it("never logs the join token", async () => {
+    const lines: string[] = [];
+    const logged = await startBridge({ port: 0, homeDir: home, providers: { system: tts, edge }, log: (m) => lines.push(m) });
+    try {
+      const ws = new WebSocket(`${logged.url.replace("http", "ws")}/ws`);
+      ws.on("message", (raw) => {
+        const msg = JSON.parse(String(raw)) as ServerMessage;
+        if (msg.type === "join") ws.send(JSON.stringify({ type: "join-result", id: msg.id, ok: true, room: "r" }));
+      });
+      await new Promise((r) => ws.once("open", r));
+      const res = await fetch(`${logged.url}/api/join`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(room) });
+      expect(res.status).toBe(200);
+      expect(lines.some((l) => l.includes("joined room r"))).toBe(true);
+      expect(lines.join("\n")).not.toContain(room.token);
+      ws.close();
+    } finally {
+      await logged.close();
+    }
+  });
+});
+
 describe("parseSayVoices", () => {
   it("parses macOS voice list lines", () => {
     const out = "Albert              en_US    # Hello! My name is Albert.\nEddy (English (UK)) en_GB    # Hello! My name is Eddy.\n";

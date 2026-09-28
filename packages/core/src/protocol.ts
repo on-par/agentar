@@ -47,12 +47,15 @@ export type ServerMessage =
   | { type: "mood"; mood: Mood }
   | { type: "gesture"; gesture: Gesture }
   | { type: "record-start"; id: string }
-  | { type: "record-stop"; id: string };
+  | { type: "record-stop"; id: string }
+  | { type: "join"; id: string; url: string; token: string }
+  | { type: "leave" };
 
 export type ClientMessage =
   | { type: "speech-start"; id: string }
   | { type: "speech-end"; id: string; interrupted?: boolean; error?: string }
-  | { type: "record-error"; id: string; error: string };
+  | { type: "record-error"; id: string; error: string }
+  | { type: "join-result"; id: string; ok: boolean; room?: string; error?: string };
 
 /** POST /api/say */
 export interface SayRequest {
@@ -96,4 +99,19 @@ export interface RecordStopResponse {
   path: string;
   mime: string;
   bytes: number;
+}
+
+/** POST /api/join */
+export interface JoinRequest {
+  /** LiveKit server URL (ws://, wss://, http:// or https://). */
+  url: string;
+  /** Participant access token. Never logged. */
+  token: string;
+}
+
+export interface JoinResponse {
+  id: string;
+  status: "joined";
+  room?: string;
+  warning?: string;
 }
