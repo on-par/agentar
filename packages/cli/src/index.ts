@@ -19,6 +19,8 @@ Usage:
   agentar stop                           Stop the background bridge started with --daemon
   agentar say <text> [--mood M] [--wait] Make the avatar speak
   agentar hush                           Stop speaking
+  agentar record --text-file F --out F.webm [--mood M]
+                                          Record a clip headlessly (no display, needs Chrome)
   agentar fetch-models [--all]           Download the built-in avatars (--all adds non-commercial samples)
   agentar mcp                            Run the MCP server (stdio) for Claude Code / Codex
   agentar hook claude-code               Claude Code Stop hook (reads JSON on stdin)
@@ -30,7 +32,8 @@ Environment:
   AGENTAR_PORT (default ${DEFAULT_PORT}), AGENTAR_URL, AGENTAR_HOME (default ~/.agentar),
   OPENAI_API_KEY, ELEVENLABS_API_KEY, XAI_API_KEY for cloud voices,
   AGENTAR_EDGE_TTS (path to edge-tts, if it is not on PATH),
-  AGENTAR_ALLOWED_ORIGINS (extra browser origins, such as a meeting-bot tunnel).
+  AGENTAR_ALLOWED_ORIGINS (extra browser origins, such as a meeting-bot tunnel),
+  AGENTAR_CHROME (Chrome/Chromium binary for agentar record), AGENTAR_RECORD_SETTLE_MS.
   AGENTAR_HOME/agentar.pid and AGENTAR_HOME/agentar.log track the --daemon process.`;
 
 async function main(argv: string[]): Promise<number> {
@@ -54,6 +57,8 @@ async function main(argv: string[]): Promise<number> {
       console.log(s.running ? `agentar stopped (pid ${s.state.pid})` : "agentar is not running");
       return 0;
     }
+    case "record":
+      return record(rest);
     case "hush":
       await fetch(`${BRIDGE}/api/stop`, { method: "POST" });
       return 0;
@@ -159,6 +164,32 @@ async function speak(text: string, mood?: string, wait = false): Promise<{ ok: b
     return res.ok ? { ok: true } : { ok: false, error: body.error ?? body.status };
   } catch {
     return { ok: false, error: `agentar is not running at ${BRIDGE}. Start it with: agentar start` };
+  }
+}
+
+async function record(args: string[]): Promise<number> {
+  const { RECORD_USAGE, parseRecordArgs, recordClip } = await import("./record.js");
+  const opts = parseRecordArgs(args);
+  if ("error" in opts) {
+    console.error(`${opts.error}\n${RECORD_USAGE}`);
+    return 1;
+  }
+  const abort = new AbortController();
+  const onSignal = () => abort.abort();
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+  try {
+    const result = await recordClip(opts, { cliPath: CLI_PATH, signal: abort.signal });
+    console.log(`Recorded ${result.out} (${result.bytes} bytes)`);
+    return 0;
+  } catch (err) {
+    const e = err as Error & { chromeLog?: string };
+    console.error(e.message);
+    if (e.chromeLog) console.error(`\nChrome output (last lines):\n${e.chromeLog}`);
+    return 1;
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
   }
 }
 
