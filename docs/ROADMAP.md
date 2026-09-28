@@ -17,23 +17,24 @@
 - **Consumer simple start**: double-click launchers in `scripts/` (`Agentar.command`, `agentar-start.sh`, `agentar-start.cmd`) that install, build, and open the avatar.
 - **TTS fallback**: when the OS speech engine is missing, the bridge switches to Edge voices or the browser's own voice instead of failing.
 - **Talking agents (people path)** in the Connect tab and README: OpenClaw, Hermes, Grok Bot, and Muse speak through `POST /api/say`.
-- **Chat B: chat with named connectors** (this PR): a Chat tab and `POST /api/chat`, so people can talk to their agent from the avatar page. There are named connectors for OpenClaw, Hermes, Grok Bot, and Muse, plus Advanced (generic HTTP):
+- **Chat B: chat with named connectors**: a Chat tab and `POST /api/chat`, so people can talk to their agent from the avatar page. There are named connectors for OpenClaw, Hermes, Grok Bot, and Muse, plus Advanced (generic HTTP):
   - OpenClaw, Hermes, and Advanced share one OpenAI-compatible adapter and stream their replies.
   - Grok Bot is experimental and goes through AgentMail email.
   - Muse is shown as a gap, because Meta has no chat API for the assistant.
   - **Speak replies** has the avatar say each reply.
   - See [chat.md](chat.md).
+- **Cut C — OBS-assisted Join-a-call**: a first-class **Join a call** panel in the Connect tab (stage URL, OBS checklist, BlackHole / VB-Cable audio) and the OpenClaw skill [`skills/agentar-join-a-call`](../skills/agentar-join-a-call/SKILL.md), so an agent shows up in Zoom or Discord with agentar as its webcam through OBS Virtual Camera. The skill's zero-dependency obs-websocket helper builds the "Agentar Stage" scene and starts the Virtual Camera when OBS is reachable.
 
 ## Next
 
-Ship sequence (locked): **Cut A** (shipped, [#1](https://github.com/on-par/agentar/pull/1)) → **Chat B** (this PR) → **Cut C** (OBS-assisted Join-a-call) → native Electron virtual cam → meeting bot.
+Ship sequence (locked): **Cut A** (shipped, [#1](https://github.com/on-par/agentar/pull/1)) → **Chat B** (shipped, [#2](https://github.com/on-par/agentar/pull/2)) → **Cut C** (OBS-assisted Join-a-call, this PR) → native Electron virtual cam → meeting bot.
 
 - **Chat follow-ups**:
   - Test Grok Bot against a live bot and tune its polling.
   - Add a real Muse connector if Meta opens an assistant API.
   - Consider the A2A protocol for agent-to-agent peers.
   - Consider OpenClaw's `/v1/responses` endpoint.
-- **Cut C — OBS-assisted OpenClaw Join-a-call**: OpenClaw skill + Connect “Join a call” so Agentar is the Zoom/Discord webcam via OBS Virtual Camera (near-term first-class path). Do not confuse with the manual OBS Browser Source already documented under Meetings. Electron/Tauri virtual cam and meeting-bot APIs stay later.
+
 
 - **Better lip-sync accuracy**
   - Use provider timestamps (ElevenLabs `with-timestamps`, Azure viseme events) when they are available.
@@ -48,6 +49,6 @@ Ship sequence (locked): **Cut A** (shipped, [#1](https://github.com/on-par/agent
 
 ## Meetings (Zoom, Teams, Meet)
 
-1. **Now**: use OBS Virtual Camera plus a virtual audio device. See [meetings.md](meetings.md).
+1. **Now**: OBS Virtual Camera plus a virtual audio device, set up from **Connect → Join a call** or the OpenClaw `agentar-join-a-call` skill. See [meetings.md](meetings.md).
 2. **Bundled virtual camera**: an Electron or Tauri shell that renders offscreen and publishes a virtual camera and microphone directly.
 3. **Meeting bot**: the agent joins as a participant through a meeting-bot API (Recall.ai, or the Zoom Meeting SDK / Teams bot framework). It streams the rendered avatar as video and the TTS audio as its microphone, and it sends transcribed meeting audio back to the agent.
