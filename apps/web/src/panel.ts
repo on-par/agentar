@@ -20,6 +20,7 @@ import {
 } from "@agentar/core";
 import { browserVoices } from "@agentar/avatar";
 import type { BridgeClient, BridgeInfo, ConnectionState, ModelList } from "./bridge-client.js";
+import { AUDIO_NOTE, joinACallSteps, SKILL_NAME, skillDirFromCli, SPEECH_NOTE, stageUrl } from "./join-a-call.js";
 
 type Patch = Record<string, unknown>;
 type Syncer = (c: AvatarConfig) => void;
@@ -567,7 +568,7 @@ export class Panel {
   setInfo(info: BridgeInfo): void {
     const origin = location.port === "5173" ? info.url : location.origin;
     const cli = `node ${shellQuote(info.cliPath)}`;
-    const snippet = (title: string, code: string, note?: string) => {
+    const snippet = (title: string, code: string, note?: string, extra?: Node) => {
       const pre = h("pre", {}, h("code", { textContent: code }));
       const copy = h("button", { type: "button", class: "copy", textContent: "Copy" });
       copy.addEventListener("click", async () => {
@@ -575,10 +576,37 @@ export class Panel {
         copy.textContent = "Copied";
         setTimeout(() => (copy.textContent = "Copy"), 1200);
       });
-      return h("div", { class: "snippet" }, h("div", { class: "snippet-head" }, h("strong", { textContent: title }), copy), pre, note ? h("p", { class: "note", textContent: note }) : null);
+      return h(
+        "div",
+        { class: "snippet" },
+        h("div", { class: "snippet-head" }, h("strong", { textContent: title }), h("span", { class: "snippet-actions" }, extra, copy)),
+        pre,
+        note ? h("p", { class: "note", textContent: note }) : null,
+      );
     };
     const heading = (text: string) => h("h3", { class: "snippets-title", textContent: text });
+    const stage = stageUrl(origin);
+    const skillDir = skillDirFromCli(info.cliPath);
     this.snippets.replaceChildren(
+      h(
+        "div",
+        { class: "join-call" },
+        heading("Join a call · Zoom, Discord"),
+        h("p", {
+          class: "note",
+          textContent:
+            "Put agentar on camera. OBS turns this avatar into a webcam, so OpenClaw (or any agent) shows up in Zoom or Discord as agentar. Teams and Meet work the same way. Keep this page and the bridge running during the call.",
+        }),
+        snippet("Stage URL (the camera view)", stage, undefined, h("a", { class: "copy link-button", href: stage, target: "_blank", rel: "noopener", textContent: "Open stage" })),
+        h("ol", { class: "steps" }, ...joinACallSteps(stage).map((s) => h("li", { textContent: s }))),
+        h("p", { class: "note", textContent: AUDIO_NOTE }),
+        h("p", { class: "note", textContent: SPEECH_NOTE }),
+        snippet(
+          "OpenClaw: install the Join-a-call skill",
+          `openclaw skills install ${skillDir ? shellQuote(skillDir) : `<agentar>/skills/${SKILL_NAME}`}`,
+          'Then ask OpenClaw to "join my Zoom call as agentar". If OBS is open with its WebSocket server on, the skill builds an "Agentar Stage" scene and starts the Virtual Camera for you; otherwise it walks you through the steps above.',
+        ),
+      ),
       heading("Talking agents (people path)"),
       h("p", {
         class: "note",
@@ -615,11 +643,6 @@ export class Panel {
       snippet("Claude Code: MCP tools", `claude mcp add agentar -- ${cli} mcp`, "Gives Claude speak, set_mood and gesture tools it can call when it wants to talk."),
       snippet("Claude Code: speak every reply", `${cli} install claude-code`, "Adds a Stop hook to ~/.claude/settings.json that reads each final reply aloud."),
       snippet("Codex CLI", `${cli} install codex`, "Adds a notify hook and the MCP server to ~/.codex/config.toml."),
-      snippet(
-        "Video calls (OBS virtual camera)",
-        `${origin}/?stage=1`,
-        "Add as an OBS Browser Source (1280x720), start the Virtual Camera, and pick it in Zoom, Teams or Meet. See docs/meetings.md for audio. Next (Cut C): OBS-assisted OpenClaw Join-a-call so the agent uses Agentar as the Zoom/Discord webcam.",
-      ),
     );
   }
 

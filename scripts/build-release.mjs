@@ -48,6 +48,8 @@ await build({
 });
 
 await cp(join(root, "apps/web/dist"), join(out, "web"), { recursive: true });
+// OpenClaw skills ship next to the CLI so the Connect tab can point at them. Tests stay behind.
+await cp(join(root, "skills"), join(out, "skills"), { recursive: true, filter: (src) => !src.endsWith(".test.ts") });
 for (const f of ["README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"]) await cp(join(root, f), join(out, f));
 
 const pkg = {
@@ -61,7 +63,7 @@ const pkg = {
   bugs: rootPkg.bugs,
   type: "module",
   bin: { agentar: "dist/agentar.js" },
-  files: ["dist", "web", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  files: ["dist", "web", "skills", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   engines: rootPkg.engines,
   dependencies,
 };

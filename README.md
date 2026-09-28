@@ -149,15 +149,21 @@ docs/             Architecture, roadmap, chat connectors, video-call setup
 | Command | Does |
 | --- | --- |
 | `npm run build` | Builds every workspace in dependency order |
-| `npm test` | Runs the Vitest suites (core, bridge, CLI) |
+| `npm test` | Runs the Vitest suites (core, bridge, CLI, web helpers, skills) |
 | `npm run typecheck` | Type-checks every workspace |
 | `npm run dev` | Bridge (watch mode) + Vite dev server |
 | `npm run fetch:models [-- --all]` | Downloads the avatar models |
 | `npm run release:build` | Assembles the publishable `agentar` package in `release/agentar` (see [docs/RELEASING.md](docs/RELEASING.md)) |
 
-## Video calls
+## Video calls: join a call
 
-Put `http://localhost:7777/?stage=1` in an OBS Browser Source, then start OBS's Virtual Camera. The avatar can then appear in Zoom, Teams, or Meet. See [docs/meetings.md](docs/meetings.md), and see [docs/ROADMAP.md](docs/ROADMAP.md) for plans to have the agent join calls itself.
+Your agent can show up in **Zoom** or **Discord** (or Teams / Meet) with agentar as its webcam. OBS Studio turns the stage view into **OBS Virtual Camera**, and the agent keeps speaking through `POST /api/say`.
+
+- **In the app**: open **Connect → Join a call**. It shows the stage URL (`http://localhost:7777/?stage=1`) with Copy and Open buttons, the four OBS steps, and the audio setup.
+- **OpenClaw**: install the [`agentar-join-a-call`](skills/agentar-join-a-call/SKILL.md) skill with `openclaw skills install <agentar>/skills/agentar-join-a-call`, then ask it to join your call as agentar. If OBS is open with its WebSocket server on, the skill's helper builds an "Agentar Stage" scene and starts the Virtual Camera. If not, the skill walks you through the steps.
+- **By hand**: add `http://localhost:7777/?stage=1` as a 1280×720 OBS Browser Source, click Start Virtual Camera, and pick **OBS Virtual Camera** in the meeting app.
+
+For the voice to reach the call, route OBS audio through BlackHole (macOS) or VB-Cable (Windows). See [docs/meetings.md](docs/meetings.md). A bundled virtual camera and a meeting bot are on the [roadmap](docs/ROADMAP.md).
 
 ## Credits
 
