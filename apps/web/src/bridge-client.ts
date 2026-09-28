@@ -1,4 +1,16 @@
-import type { AvatarConfig, ClientMessage, SayRequest, SayResponse, ServerMessage, VoiceInfo, VoiceProvider } from "@agentar/core";
+import type {
+  AvatarConfig,
+  ChatConfigView,
+  ChatRequest,
+  ChatResponse,
+  ChatStreamEvent,
+  ClientMessage,
+  SayRequest,
+  SayResponse,
+  ServerMessage,
+  VoiceInfo,
+  VoiceProvider,
+} from "@agentar/core";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 
@@ -90,6 +102,36 @@ export class BridgeClient {
 
   async models(): Promise<ModelList> {
     return json(await fetch("/api/models"));
+  }
+
+  async chatConfig(): Promise<ChatConfigView> {
+    return json(await fetch("/api/chat/config"));
+  }
+
+  async updateChatConfig(patch: unknown): Promise<ChatConfigView> {
+    return json(await fetch("/api/chat/config", { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(patch) }));
+  }
+
+  /** Send a chat to the agent through the bridge. Reply text streams into `onDelta`. */
+  async chat(req: Omit<ChatRequest, "stream">, onDelta: (text: string) => void, signal?: AbortSignal): Promise<ChatResponse> {
+    const res = await fetch("/api/chat", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ ...req, stream: true }), signal });
+    if (!res.body || !(res.headers.get("content-type") ?? "").includes("ndjson")) return json(res);
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += value ?? "";
+      const lines = buffer.split("\n");
+      buffer = done ? "" : lines.pop()!;
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line) as ChatStreamEvent;
+        if (event.type === "delta") onDelta(event.text);
+        else if (event.type === "done") return { connector: event.connector, reply: event.reply };
+        else throw new Error(event.error);
+      }
+      if (done) throw new Error("The bridge closed the chat before the reply finished.");
+    }
   }
 
   async uploadModel(file: File): Promise<{ name: string; url: string }> {
