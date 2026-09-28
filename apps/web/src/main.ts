@@ -31,6 +31,7 @@ const publisher = new RoomPublisher({
   speech: stage.speech,
   connect: connectLiveKit,
   report: (r) => client.send({ type: "join-result", ...r }),
+  state: (s) => client.send({ type: "room-state", ...s }),
 });
 const recorder = new StageRecorder({
   canvas: stage.renderer.domElement,
@@ -82,7 +83,7 @@ if (import.meta.env.DEV) Object.assign(window, { agentar: { stage } });
 
 /** Join a LiveKit room. The SDK loads lazily, so the stage and OBS path never pay for it. */
 async function connectLiveKit(url: string, token: string): Promise<RoomLike> {
-  const { Room, Track } = await import("livekit-client");
+  const { Room, RoomEvent, Track } = await import("livekit-client");
   const room = new Room();
   await room.connect(url, token);
   return {
@@ -98,6 +99,12 @@ async function connectLiveKit(url: string, token: string): Promise<RoomLike> {
     },
     // Keep local tracks running: the speech capture track is shared with the recorder.
     disconnect: () => room.disconnect(false),
+    // SignalReconnecting is left out: media can still flow while only signaling reconnects.
+    onConnectionChange: (listener) => {
+      room.on(RoomEvent.Reconnecting, () => listener("reconnecting"));
+      room.on(RoomEvent.Reconnected, () => listener("reconnected"));
+      room.on(RoomEvent.Disconnected, () => listener("disconnected"));
+    },
   };
 }
 

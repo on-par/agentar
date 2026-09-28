@@ -738,6 +738,80 @@ describe("join", () => {
       await logged.close();
     }
   });
+
+  describe("reconnect", () => {
+    const status = async () => (await api("/api/status")).json();
+    const settle = () => new Promise((r) => setTimeout(r, 50));
+
+    async function joinWith(avatar: Awaited<ReturnType<typeof connectAvatar>>) {
+      const pending = post("/api/join", room);
+      await answerJoin(avatar, { ok: true, room: "r" });
+      expect((await pending).status).toBe(200);
+    }
+
+    it("reports not-joined status with no join", async () => {
+      const res = await api("/api/status");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, clients: 0, room: { state: "not-joined" } });
+    });
+
+    it("tracks the room going disconnected while rejoining and connected again", async () => {
+      const avatar = await connectAvatar();
+      await joinWith(avatar);
+      expect(await status()).toEqual({
+        ok: true,
+        clients: 1,
+        room: { state: "connected", rejoining: false, room: "r", since: expect.any(String) },
+      });
+
+      avatar.ws.send(JSON.stringify({ type: "room-state", state: "disconnected", rejoining: true, room: "r" }));
+      await settle();
+      expect((await status()).room).toMatchObject({ state: "disconnected", rejoining: true, room: "r" });
+
+      avatar.ws.send(JSON.stringify({ type: "room-state", state: "connected", rejoining: false, room: "r" }));
+      await settle();
+      expect((await status()).room).toMatchObject({ state: "connected", rejoining: false, room: "r" });
+      avatar.ws.close();
+    });
+
+    it("ignores room-state from another page or without an active join", async () => {
+      const other = await connectAvatar();
+      other.ws.send(JSON.stringify({ type: "room-state", state: "disconnected", rejoining: true }));
+      await settle();
+      expect((await status()).room).toEqual({ state: "not-joined" });
+
+      const avatar = await connectAvatar();
+      await joinWith(avatar);
+      other.ws.send(JSON.stringify({ type: "room-state", state: "disconnected", rejoining: true }));
+      await settle();
+      expect((await status()).room).toMatchObject({ state: "connected" });
+      other.ws.close();
+      avatar.ws.close();
+    });
+
+    it("shows the error once the page gives up, and not-joined after leave", async () => {
+      const avatar = await connectAvatar();
+      await joinWith(avatar);
+      avatar.ws.send(
+        JSON.stringify({ type: "room-state", state: "disconnected", rejoining: false, room: "r", error: "Could not rejoin the room after a network drop" }),
+      );
+      await settle();
+      const body = await status();
+      expect(body.room).toMatchObject({ state: "disconnected", rejoining: false, error: "Could not rejoin the room after a network drop" });
+      expect(JSON.stringify(body)).not.toContain(room.token);
+
+      expect((await post("/api/leave", {})).status).toBe(200);
+      expect((await status()).room).toEqual({ state: "not-joined" });
+      avatar.ws.close();
+    });
+
+    it("never puts the token in the status body", async () => {
+      const avatar = await connectAvatar();
+      await joinWith(avatar);
+      expect(await (await api("/api/status")).text()).not.toContain(room.token);
+      avatar.ws.close();
+    });
+  });
 });
 
 describe("parseSayVoices", () => {

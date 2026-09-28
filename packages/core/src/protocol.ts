@@ -55,7 +55,11 @@ export type ClientMessage =
   | { type: "speech-start"; id: string }
   | { type: "speech-end"; id: string; interrupted?: boolean; error?: string }
   | { type: "record-error"; id: string; error: string }
-  | { type: "join-result"; id: string; ok: boolean; room?: string; error?: string };
+  | { type: "join-result"; id: string; ok: boolean; room?: string; error?: string }
+  | { type: "room-state"; state: RoomConnectionState; rejoining: boolean; room?: string; error?: string };
+
+/** Whether the avatar page is currently connected to its WebRTC room. */
+export type RoomConnectionState = "connected" | "disconnected";
 
 /** POST /api/say */
 export interface SayRequest {
@@ -84,6 +88,25 @@ export interface HealthResponse {
   name: "agentar";
   version: string;
   clients: number;
+}
+
+/** GET /api/status → room */
+export interface RoomStatus {
+  state: "not-joined" | RoomConnectionState;
+  room?: string;
+  /** True while the page is still trying to rejoin after a drop. */
+  rejoining?: boolean;
+  /** ISO time of the last state change. */
+  since?: string;
+  /** Why the page gave up rejoining. */
+  error?: string;
+}
+
+/** GET /api/status */
+export interface StatusResponse {
+  ok: true;
+  clients: number;
+  room: RoomStatus;
 }
 
 /** POST /api/record/start */
