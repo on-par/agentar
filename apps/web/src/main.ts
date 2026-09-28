@@ -167,6 +167,7 @@ client.onState = (state) => {
   if (state === "open") {
     client.models().then((m) => panel.setModels(m)).catch(() => undefined);
     client.info().then((i) => panel.setInfo(i)).catch(() => undefined);
+    void panel.loadChat();
   }
 };
 

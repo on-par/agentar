@@ -1,4 +1,6 @@
 import {
+  CHAT_CONNECTORS,
+  CHAT_CONNECTOR_INFO,
   FRAMINGS,
   GESTURES,
   GLASSES,
@@ -6,7 +8,12 @@ import {
   LIGHTINGS,
   MOODS,
   VOICE_PROVIDERS,
+  toSpeakable,
   type AvatarConfig,
+  type ChatConfigView,
+  type ChatConnectorId,
+  type ChatMessage,
+  type ChatSettingKey,
   type Gesture,
   type Mood,
   type VoiceInfo,
@@ -85,6 +92,22 @@ export class Panel {
   private voicesFor = "";
   private models: ModelList = { builtin: [], user: [] };
   private readonly snippets = h("div", { class: "snippets" }, h("p", { class: "note", textContent: "Waiting for the bridge…" }));
+  private readonly chat = {
+    view: null as ChatConfigView | null,
+    connector: h("select", { ariaLabel: "Agent" }),
+    help: h("p", { class: "note" }),
+    gap: h("p", { class: "note warn" }),
+    settings: h("div", { class: "chat-fields" }),
+    settingsStatus: h("p", { class: "note", role: "status" }),
+    log: h("div", { class: "chat-log", role: "log", ariaLive: "polite" }),
+    input: h("textarea", { rows: 3, placeholder: "Message your agent…" }),
+    send: h("button", { type: "button", class: "primary", textContent: "Send" }),
+    sayReplies: h("input", { type: "checkbox" }),
+    status: h("p", { class: "note", role: "status" }),
+    /** One conversation per connector, so switching agents does not lose a chat. */
+    conversations: new Map<ChatConnectorId, { id: string; messages: ChatMessage[]; log: HTMLElement[] }>(),
+    pending: null as AbortController | null,
+  };
 
   constructor(private readonly deps: PanelDeps) {
     this.statusDot = h("span", { class: "dot" });
@@ -96,6 +119,7 @@ export class Panel {
 
     const tabs = [
       { id: "talk", label: "Talk", body: this.talkTab() },
+      { id: "chat", label: "Chat", body: this.chatTab() },
       { id: "look", label: "Look", body: this.lookTab() },
       { id: "voice", label: "Voice", body: this.voiceTab() },
       { id: "behavior", label: "Behavior", body: this.behaviorTab() },
@@ -218,6 +242,218 @@ export class Panel {
       field("Mood", moods),
       field("Gesture", gestures),
     ];
+  }
+
+  private chatTab(): Node[] {
+    const c = this.chat;
+    c.connector.append(
+      ...CHAT_CONNECTORS.map((id) => {
+        const info = CHAT_CONNECTOR_INFO[id];
+        const suffix = info.transport === "none" ? " — can't chat yet" : info.transport === "agentmail" ? " — email, experimental" : "";
+        return h("option", { value: id, textContent: info.label + suffix });
+      }),
+    );
+    c.connector.addEventListener("change", () => {
+      const id = c.connector.value as ChatConnectorId;
+      this.renderChatConnector(id);
+      void this.saveChat({ connector: id });
+    });
+    c.sayReplies.addEventListener("change", () => void this.saveChat({ sayReplies: c.sayReplies.checked }));
+
+    c.send.addEventListener("click", () => void this.sendChat());
+    c.input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        void this.sendChat();
+      }
+    });
+    const reset = h("button", { type: "button", textContent: "New chat" });
+    reset.addEventListener("click", () => {
+      c.pending?.abort();
+      c.conversations.delete(this.chatConnector());
+      this.renderChatLog();
+    });
+
+    const settings = h("details", { class: "chat-settings" }, h("summary", { textContent: "Connection settings" }), c.settings, c.settingsStatus);
+    this.renderChatConnector("openclaw");
+    return [
+      field("Agent", c.connector),
+      c.help,
+      c.gap,
+      settings,
+      c.log,
+      c.input,
+      h("div", { class: "row" }, c.send, reset, h("label", { class: "check hint" }, c.sayReplies, " Speak replies")),
+      c.status,
+    ];
+  }
+
+  /** Load the saved chat settings (keys stay in the bridge; we only learn whether one is set). */
+  async loadChat(): Promise<void> {
+    try {
+      this.applyChatView(await this.deps.client.chatConfig());
+    } catch (err) {
+      this.chat.status.textContent = `Could not load chat settings: ${(err as Error).message}`;
+    }
+  }
+
+  private applyChatView(view: ChatConfigView): void {
+    const c = this.chat;
+    c.view = view;
+    c.sayReplies.checked = view.sayReplies;
+    if (c.connector.value !== view.connector) c.connector.value = view.connector;
+    this.renderChatConnector(view.connector);
+  }
+
+  private async saveChat(patch: unknown): Promise<boolean> {
+    try {
+      this.applyChatView(await this.deps.client.updateChatConfig(patch));
+      return true;
+    } catch (err) {
+      this.chat.settingsStatus.textContent = `Could not save: ${(err as Error).message}`;
+      return false;
+    }
+  }
+
+  private chatConnector(): ChatConnectorId {
+    return this.chat.connector.value as ChatConnectorId;
+  }
+
+  /** Show the help, caveats and settings of the selected connector. */
+  private renderChatConnector(id: ChatConnectorId): void {
+    const c = this.chat;
+    const info = CHAT_CONNECTOR_INFO[id];
+    const saved = c.view?.connectors[id];
+    c.help.textContent = info.help;
+    c.gap.textContent = info.gap ?? "";
+    c.send.disabled = info.transport === "none" || c.pending !== null;
+    c.input.disabled = info.transport === "none";
+    c.input.placeholder = info.transport === "none" ? `${info.label} cannot chat through Agentar yet.` : `Message ${info.label}…`;
+    c.settingsStatus.textContent = "";
+    this.renderChatLog();
+
+    const labels: Record<ChatSettingKey, string> = {
+      baseUrl: "Base URL",
+      model: "Model",
+      apiKey: info.apiKeyLabel ?? "API key",
+      inbox: "Your AgentMail inbox",
+      to: `${info.label} email address`,
+    };
+    const inputs = new Map<ChatSettingKey, HTMLInputElement>();
+    const rows = info.fields.map((key) => {
+      const input = h("input", { type: key === "apiKey" ? "password" : "text", autocomplete: "off", spellcheck: false });
+      if (key === "apiKey") {
+        input.placeholder = saved?.apiKeyFromEnv ? `Using ${info.apiKeyEnv}` : saved?.apiKeySet ? "Saved (type to replace)" : "Not set";
+      } else {
+        input.value = saved?.[key] ?? "";
+        input.placeholder = info.defaults[key] || (key === "inbox" ? "you@agentmail.to" : key === "to" ? "bot@yourworkspace.agentmail.to" : "");
+      }
+      inputs.set(key, input);
+      return field(labels[key], input);
+    });
+    if (!rows.length) {
+      c.settings.replaceChildren(h("p", { class: "note", textContent: "Nothing to set up: this agent has no chat connection." }));
+      return;
+    }
+    const save = h("button", { type: "button", textContent: "Save" });
+    save.addEventListener("click", async () => {
+      const patch: Record<string, string> = {};
+      for (const [key, input] of inputs) {
+        // An empty key field keeps the saved key.
+        if (key !== "apiKey" || input.value.trim()) patch[key] = input.value.trim();
+      }
+      const hadKey = saved?.apiKeySet && !saved.apiKeyFromEnv;
+      if (!(await this.saveChat({ connectors: { [id]: patch } }))) return;
+      const lostKey = hadKey && !this.chat.view?.connectors[id].apiKeySet;
+      this.chat.settingsStatus.textContent = lostKey ? "Saved. The base URL changed, so the saved key was removed: paste it again." : "Saved.";
+    });
+    const buttons = h("div", { class: "row" }, save);
+    if (saved?.apiKeySet && !saved.apiKeyFromEnv) {
+      const forget = h("button", { type: "button", class: "ghost", textContent: "Forget key" });
+      forget.addEventListener("click", async () => {
+        if (await this.saveChat({ connectors: { [id]: { apiKey: "" } } })) this.chat.settingsStatus.textContent = "Key removed.";
+      });
+      buttons.append(forget);
+    }
+    const env = info.apiKeyEnv ? h("p", { class: "note", textContent: `Or set ${info.apiKeyEnv} where the bridge runs.` }) : null;
+    c.settings.replaceChildren(...rows, ...(env ? [env] : []), buttons);
+  }
+
+  private conversation(id: ChatConnectorId) {
+    let conv = this.chat.conversations.get(id);
+    if (!conv) {
+      conv = { id: crypto.randomUUID(), messages: [], log: [] };
+      this.chat.conversations.set(id, conv);
+    }
+    return conv;
+  }
+
+  private renderChatLog(): void {
+    const conv = this.conversation(this.chatConnector());
+    this.chat.log.replaceChildren(...conv.log);
+    this.chat.log.hidden = conv.log.length === 0;
+    this.chat.log.scrollTop = this.chat.log.scrollHeight;
+  }
+
+  private chatBubble(id: ChatConnectorId, kind: "user" | "assistant" | "error", text: string): HTMLElement {
+    const bubble = h("div", { class: `msg ${kind}`, textContent: text });
+    this.conversation(id).log.push(bubble);
+    if (this.chatConnector() === id) this.renderChatLog();
+    return bubble;
+  }
+
+  private async sendChat(): Promise<void> {
+    const c = this.chat;
+    const text = c.input.value.trim();
+    const id = this.chatConnector();
+    const info = CHAT_CONNECTOR_INFO[id];
+    if (!text || c.pending || info.transport === "none") return;
+    const conv = this.conversation(id);
+    conv.messages.push({ role: "user", content: text });
+    this.chatBubble(id, "user", text);
+    c.input.value = "";
+    const bubble = this.chatBubble(
+      id,
+      "assistant",
+      info.transport === "agentmail" ? `Emailed ${info.label}. Waiting for the reply (this can take minutes)…` : "…",
+    );
+    bubble.classList.add("pending");
+    const abort = (c.pending = new AbortController());
+    c.send.disabled = true;
+    c.status.textContent = "";
+    let streamed = "";
+    try {
+      const res = await this.deps.client.chat(
+        { connector: id, messages: conv.messages, conversation: conv.id },
+        (delta) => {
+          streamed += delta;
+          bubble.textContent = streamed;
+          bubble.classList.remove("pending");
+          if (this.chatConnector() === id) c.log.scrollTop = c.log.scrollHeight;
+        },
+        abort.signal,
+      );
+      bubble.textContent = res.reply;
+      bubble.classList.remove("pending");
+      conv.messages.push({ role: "assistant", content: res.reply });
+      if (c.sayReplies.checked) {
+        const said = await this.deps.client.say({ text: toSpeakable(res.reply, { maxChars: 1200 }) });
+        if (said.status !== "queued") c.status.textContent = `The avatar could not speak the reply: ${said.error ?? said.status}`;
+      }
+    } catch (err) {
+      // Take the failed message out of the history so a retry does not send it twice.
+      conv.messages.pop();
+      if (abort.signal.aborted) {
+        bubble.remove();
+      } else {
+        bubble.className = "msg error";
+        bubble.textContent = (err as Error).message;
+        if (!c.input.value) c.input.value = text;
+      }
+    } finally {
+      c.pending = null;
+      c.send.disabled = CHAT_CONNECTOR_INFO[this.chatConnector()].transport === "none";
+    }
   }
 
   private lookTab(): Node[] {
@@ -352,6 +588,27 @@ export class Panel {
         "Make the avatar speak",
         `curl -X POST ${origin}/api/say -H "Content-Type: application/json" -d '{"text":"Hi! I am here.","mood":"happy"}'`,
         'Optional fields: "mood", "wait": true (answer after the avatar finishes), "interrupt": false (queue instead of cutting in).',
+      ),
+      heading("Chat with your agent"),
+      h("p", {
+        class: "note",
+        textContent:
+          "Open the Chat tab and pick OpenClaw, Hermes, Grok Bot, or Advanced (any OpenAI-compatible server). The bridge calls the agent for you, so keys stay on this machine. Muse has no chat API yet; it can still speak through /api/say.",
+      }),
+      snippet(
+        "OpenClaw: turn on the chat endpoint",
+        `{ "gateway": { "http": { "endpoints": { "chatCompletions": { "enabled": true } } } } }`,
+        "Merge into ~/.openclaw/openclaw.json and restart the gateway. The token is gateway.auth.token (or OPENCLAW_GATEWAY_TOKEN).",
+      ),
+      snippet(
+        "Hermes: turn on the API server",
+        "API_SERVER_ENABLED=true\nAPI_SERVER_KEY=choose-a-secret",
+        "Add to ~/.hermes/.env, run `hermes gateway`, and paste the same key into the Chat settings.",
+      ),
+      snippet(
+        "Chat from a script",
+        `curl -X POST ${origin}/api/chat -H "Content-Type: application/json" -d '{"connector":"openclaw","messages":[{"role":"user","content":"Hi!"}]}'`,
+        'Returns {"reply": "..."}. Add "stream": true for NDJSON deltas.',
       ),
       heading("Builders"),
       snippet("Claude Code: MCP tools", `claude mcp add agentar -- ${cli} mcp`, "Gives Claude speak, set_mood and gesture tools it can call when it wants to talk."),

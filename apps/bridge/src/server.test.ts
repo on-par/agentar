@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -293,6 +294,118 @@ describe("voice fallback", () => {
     expect(await res.json()).toMatchObject({ status: "error", error: "system failed" });
     expect(bridge.store.get().voice.provider).toBe("system");
     avatar.ws.close();
+  });
+});
+
+describe("chat", () => {
+  let upstream: Server;
+  let upstreamUrl: string;
+  let requests: Array<{ url: string; auth?: string; body: any }>;
+
+  beforeEach(async () => {
+    requests = [];
+    upstream = createServer(async (req, res) => {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const body = JSON.parse(raw);
+      requests.push({ url: req.url ?? "", auth: req.headers.authorization, body });
+      if (req.headers.authorization !== "Bearer gw") {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: { message: "unauthorized" } }));
+      }
+      if (body.stream) {
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        for (const t of ["Hi ", "there"]) res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`);
+        return res.end("data: [DONE]\n\n");
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "Hi there" } }] }));
+    });
+    await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
+    upstreamUrl = `http://127.0.0.1:${(upstream.address() as { port: number }).port}/v1`;
+  });
+
+  afterEach(async () => {
+    await new Promise((r) => upstream.close(r));
+  });
+
+  const saveChat = (patch: unknown) =>
+    api("/api/chat/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+  const hi = [{ role: "user", content: "Hello" }];
+
+  it("saves connector settings without ever returning the key", async () => {
+    const res = await saveChat({ connector: "hermes", sayReplies: false, connectors: { openclaw: { baseUrl: upstreamUrl, apiKey: "gw" } } });
+    const view = await res.json();
+    expect(view).toMatchObject({ connector: "hermes", sayReplies: false, connectors: { openclaw: { baseUrl: upstreamUrl, apiKeySet: true } } });
+    expect(JSON.stringify(view)).not.toContain('"gw"');
+    expect(JSON.stringify(await (await api("/api/chat/config")).json())).not.toContain('"gw"');
+
+    // Saving other fields keeps the key; the avatar config (broadcast to every view) never carries chat settings.
+    await saveChat({ connectors: { openclaw: { model: "openclaw/main" } } });
+    expect(bridge.store.getChat().connectors.openclaw).toMatchObject({ apiKey: "gw", model: "openclaw/main" });
+    expect(await (await api("/api/config")).json()).not.toHaveProperty("chat");
+
+    const file = join(home, "config.json");
+    expect(JSON.parse(await readFile(file, "utf8")).chat.connectors.openclaw.apiKey).toBe("gw");
+    if (process.platform !== "win32") expect((await stat(file)).mode & 0o077).toBe(0);
+  });
+
+  it("proxies a chat to OpenClaw and returns the reply", async () => {
+    await saveChat({ connectors: { openclaw: { baseUrl: upstreamUrl, apiKey: "gw" } } });
+    const res = await post("/api/chat", { messages: hi, conversation: "c1" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ connector: "openclaw", reply: "Hi there" });
+    expect(requests[0]).toMatchObject({ url: "/v1/chat/completions", auth: "Bearer gw", body: { model: "openclaw/default", user: "agentar:c1" } });
+  });
+
+  it("streams replies as NDJSON", async () => {
+    await saveChat({ connectors: { openclaw: { baseUrl: upstreamUrl, apiKey: "gw" } } });
+    const res = await post("/api/chat", { messages: hi, stream: true });
+    expect(res.headers.get("content-type")).toMatch(/application\/x-ndjson/);
+    const events = (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
+    expect(events).toEqual([
+      { type: "delta", text: "Hi " },
+      { type: "delta", text: "there" },
+      { type: "done", connector: "openclaw", reply: "Hi there" },
+    ]);
+  });
+
+  it("returns a real status code when a streamed chat fails before any text", async () => {
+    await saveChat({ connectors: { openclaw: { baseUrl: upstreamUrl, apiKey: "wrong" } } });
+    const res = await post("/api/chat", { messages: hi, stream: true });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ code: "auth", error: expect.stringMatching(/OpenClaw refused the request \(401\)/) });
+  });
+
+  it("reports a gateway that is not running", async () => {
+    await new Promise((r) => upstream.close(r));
+    await saveChat({ connectors: { hermes: { baseUrl: upstreamUrl, apiKey: "k" } } });
+    const res = await post("/api/chat", { connector: "hermes", messages: hi });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ code: "unreachable", error: expect.stringMatching(/Could not reach Hermes .*connection refused/) });
+    upstream = createServer().listen(0); // for afterEach
+  });
+
+  it("answers unsupported and unknown connectors clearly", async () => {
+    const muse = await post("/api/chat", { connector: "muse", messages: hi });
+    expect(muse.status).toBe(501);
+    expect(await muse.json()).toMatchObject({ code: "unsupported" });
+
+    const unknown = await post("/api/chat", { connector: "skynet", messages: hi });
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toMatchObject({ code: "bad-request", error: expect.stringMatching(/Unknown connector/) });
+
+    expect((await post("/api/chat", { messages: [] })).status).toBe(400);
+  });
+
+  it("blocks cross-origin chat requests", async () => {
+    const res = await api("/api/chat", {
+      method: "POST",
+      headers: { Origin: "https://evil.example", "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: hi }),
+    });
+    expect(res.status).toBe(403);
+    expect((await api("/api/chat/config", { headers: { Origin: "https://evil.example" } })).status).toBe(403);
   });
 });
 

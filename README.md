@@ -19,7 +19,7 @@ You need [Node.js](https://nodejs.org) 24 or newer. Then:
 3. Click the page once, so the browser allows sound.
 4. On the **Talk** tab, type something and press **Speak**.
 
-To have your agent talk through the avatar, see [Talking agents](#talking-agents-people-path).
+To have your agent talk through the avatar, see [Talking agents](#talking-agents-people-path). To talk *to* your agent from the avatar page, use the **Chat** tab (see [Chat with your agent](#chat-with-your-agent)).
 
 If your computer has no built-in speech engine (for example Linux without `espeak-ng`), Agentar switches to Microsoft Edge voices when [`edge-tts`](https://github.com/rany2/edge-tts) is installed, and to the browser's own voice otherwise.
 
@@ -57,6 +57,18 @@ curl -X POST localhost:7777/api/say -H 'Content-Type: application/json' -d '{"te
 ```
 
 Optional fields: `mood`, `wait: true` (answer after the avatar finishes speaking), and `interrupt: false` (queue the reply instead of cutting in). A plain-text body (`Content-Type: text/plain`) also works. The **Connect** tab shows this command with the correct address.
+
+## Chat with your agent
+
+The **Chat** tab lets you type to your agent and read its replies next to the avatar. With **Speak replies** on, the avatar says each reply aloud. Pick a connector:
+
+- **OpenClaw**: the gateway's OpenAI-compatible chat endpoint (`http://127.0.0.1:18789/v1`, model `openclaw/default`). The endpoint is off by default. Turn it on with `gateway.http.endpoints.chatCompletions.enabled: true` in `~/.openclaw/openclaw.json`, then paste the gateway token.
+- **Hermes**: the Hermes Agent API server (`http://127.0.0.1:8642/v1`, model `hermes-agent`). Set `API_SERVER_ENABLED=true` and `API_SERVER_KEY` in `~/.hermes/.env`, then run `hermes gateway`.
+- **Grok Bot** (experimental): Grok Bot has no chat API, so Agentar emails it through AgentMail and waits for the reply in the thread. Replies can take minutes and do not stream.
+- **Muse (Meta)**: not possible yet. Meta has no third-party chat API for the Meta AI assistant. Muse can still make the avatar speak through `/api/say`.
+- **Advanced (generic HTTP)**: any OpenAI-compatible chat completions server.
+
+The bridge makes the calls to your agent, so API keys stay on your machine. The bridge saves them in `~/.agentar/config.json`, readable only by you, and never sends them to the browser. Scripts can use `POST /api/chat` too. See [docs/chat.md](docs/chat.md) for setup details, the HTTP API, and known gaps.
 
 ## Connect your agent (builders)
 
@@ -101,11 +113,11 @@ The bridge saves your settings to `~/.agentar/config.json`. It applies them live
 ```
 packages/core     Shared types, config schema, bridge protocol, text→viseme + audio analysis (no dependencies)
 packages/avatar   three.js renderer: model loading, pose, idle life, moods, recoloring, accessories, speech player
-apps/bridge       Local HTTP + WebSocket server: config storage, TTS engines, speech queue, static hosting
+apps/bridge       Local HTTP + WebSocket server: config storage, TTS engines, speech queue, chat connectors, static hosting
 apps/web          Vite app: the avatar view plus the customization panel
 packages/mcp      MCP server (stdio) exposing avatar tools to agents
 packages/cli      `agentar` command: start, say, mcp, hooks, installers
-docs/             Architecture, roadmap, video-call setup
+docs/             Architecture, roadmap, chat connectors, video-call setup
 ```
 
 ## Scripts

@@ -1,6 +1,7 @@
 export * from "./visemes.js";
 export * from "./moods.js";
 export * from "./config.js";
+export * from "./chat.js";
 export * from "./protocol.js";
 export * from "./speakable.js";
 export * from "./lipsync/english.js";
